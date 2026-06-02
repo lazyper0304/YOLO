@@ -1,0 +1,63 @@
+sequenceDiagram
+    actor U as 用户
+    participant F as Vue 前端
+    participant API as FastAPI Router
+    participant DS as DetectionService
+    participant YS as YOLOService
+    participant LS as LLMService
+    participant IS as ImageService
+    participant DB as MySQL
+    participant R as Redis
+
+    U->>F: 选择图片 + 协同模式 + 模型
+    U->>F: 点击「开始检测」
+    F->>F: LoadingOverlay 显示
+
+    F->>API: POST /api/detection/image (multipart: file + mode + yolo_id + llm_id)
+    API->>API: 校验 JWT + 参数
+
+    API->>IS: save_upload(file, user_id, "images")
+    IS-->>API: image_path
+
+    API->>DS: detect_image(db, user_id, image_path, "collaborative", yolo_id, llm_id)
+
+    Note over DS: 协同模式核心逻辑
+
+    DS->>YS: detect(model, image_path)
+    YS->>YS: 加载 YOLO 模型（从缓存或磁盘）
+    YS-->>DS: List~BBoxItem~ (detections)
+
+    alt 无检测结果
+        DS-->>API: 返回空结果 + 提示
+    else 有检测结果
+        loop 每个检测区域
+            DS->>IS: crop_region(image_path, bbox)
+            IS-->>DS: region_image_bytes
+
+            DS->>IS: encode_to_base64(region_image_bytes)
+            IS-->>DS: region_base64
+
+            DS->>LS: analyze_region(api_base_url, api_key, model_name, region_base64, context)
+            LS->>LS: 构造 OpenAI/Claude 兼容请求
+            LS-->>DS: region_description
+        end
+
+        DS->>IS: draw_bboxes(image_path, detections)
+        IS-->>DS: annotated_image_base64
+
+        DS->>IS: create_thumbnail(image_path, 200)
+        IS-->>DS: thumbnail_path
+
+        DS->>DB: INSERT DetectionRecord
+        DB-->>DS: record_id
+
+        DS->>R: SETEX cache:detection:{record_id} 3600 result_json
+
+        DS-->>API: DetectionResponse
+    end
+
+    API-->>F: APIResponse{code:0, data: DetectionResponse}
+    F->>F: ImageCanvas 渲染标注图
+    F->>F: BBoxList 展示检测列表
+    F->>F: LLMAnalysis 展示分析文字
+    F->>F: LoadingOverlay 隐藏

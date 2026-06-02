@@ -1,0 +1,225 @@
+classDiagram
+    direction TB
+
+    %% ========== ORM Models ==========
+    class User {
+        +int id
+        +str username
+        +str email
+        +str password_hash
+        +datetime created_at
+        +datetime updated_at
+        +List~DetectionRecord~ records
+        +List~LLMConfig~ llm_configs
+        +List~YOLOModel~ yolo_models
+    }
+
+    class LLMConfig {
+        +int id
+        +int user_id
+        +str name
+        +str api_base_url
+        +str api_key
+        +str model_name
+        +str provider
+        +bool is_active
+        +datetime created_at
+        +datetime updated_at
+    }
+
+    class YOLOModel {
+        +int id
+        +int user_id
+        +str name
+        +str file_path
+        +str model_type
+        +bool is_builtin
+        +int file_size
+        +bool is_active
+        +datetime uploaded_at
+    }
+
+    class DetectionRecord {
+        +int id
+        +int user_id
+        +str source_type
+        +str source_path
+        +str mode
+        +int yolo_model_id
+        +int llm_config_id
+        +dict result_json
+        +str thumbnail_path
+        +datetime created_at
+    }
+
+    User "1" -- "many" DetectionRecord
+    User "1" -- "many" LLMConfig
+    User "1" -- "many" YOLOModel
+    DetectionRecord "many" -- "1" YOLOModel : yolo_model_id
+    DetectionRecord "many" -- "1" LLMConfig : llm_config_id
+
+    %% ========== Pydantic Schemas ==========
+    class RegisterRequest {
+        +str username
+        +str email
+        +str password
+    }
+
+    class LoginRequest {
+        +str username
+        +str password
+    }
+
+    class TokenResponse {
+        +str access_token
+        +str token_type
+        +UserResponse user
+    }
+
+    class UserResponse {
+        +int id
+        +str username
+        +str email
+    }
+
+    class LLMConfigCreate {
+        +str name
+        +str api_base_url
+        +str api_key
+        +str model_name
+        +str provider
+    }
+
+    class LLMConfigResponse {
+        +int id
+        +str name
+        +str api_base_url
+        +str model_name
+        +str provider
+        +bool is_active
+        +str created_at
+    }
+
+    class YOLOModelResponse {
+        +int id
+        +str name
+        +str model_type
+        +bool is_builtin
+        +int file_size
+        +bool is_active
+        +str uploaded_at
+    }
+
+    class DetectionRequest {
+        +str mode
+        +int yolo_model_id
+        +int llm_config_id
+        +int frame_interval
+    }
+
+    class BBoxItem {
+        +str class_name
+        +float confidence
+        +float x1
+        +float y1
+        +float x2
+        +float y2
+    }
+
+    class LLMAnalysisItem {
+        +int region_index
+        +str class_name
+        +float confidence
+        +str description
+    }
+
+    class DetectionResponse {
+        +int record_id
+        +str mode
+        +str source_type
+        +str annotated_image_base64
+        +List~BBoxItem~ detections
+        +List~LLMAnalysisItem~ llm_analysis
+        +datetime created_at
+    }
+
+    class HistoryQuery {
+        +int page
+        +int page_size
+        +str mode
+        +str source_type
+        +str date_from
+        +str date_to
+    }
+
+    class HistoryListResponse {
+        +int total
+        +int page
+        +List~HistoryItem~ items
+    }
+
+    class HistoryItem {
+        +int id
+        +str source_type
+        +str mode
+        +str thumbnail_base64
+        +datetime created_at
+    }
+
+    class APIResponse~T~ {
+        +int code
+        +str message
+        +T data
+    }
+
+    %% ========== Service Classes ==========
+    class AuthService {
+        +async register(db, RegisterRequest) User
+        +async authenticate(db, username, password) User
+        +create_access_token(user_id) str
+        +get_password_hash(password) str
+        +verify_password(plain, hashed) bool
+    }
+
+    class YOLOService {
+        -dict _model_cache
+        +async load_model(model_path, device) YOLO
+        +async detect(model, image_path) List~BBoxItem~
+        +async unload_model(model_id) void
+        +validate_model_file(file_path) bool
+    }
+
+    class LLMService {
+        -dict _adapter_registry
+        +register_adapter(provider, adapter) void
+        +async analyze_image(api_base_url, api_key, model_name, image_base64) str
+        +async analyze_region(api_base_url, api_key, model_name, region_image_base64, context) str
+        +async test_connection(api_base_url, api_key, model_name) bool
+    }
+
+    class DetectionService {
+        +async detect_image(db, user_id, image_path, mode, yolo_model_id, llm_config_id) DetectionResponse
+        +async detect_video(db, user_id, video_path, mode, yolo_model_id, llm_config_id, frame_interval) List~DetectionResponse~
+        +async detect_camera_frame(db, user_id, frame_bytes, mode, ...) DetectionResponse
+        +async _yolo_only(image_path, yolo_model_id) dict
+        +async _llm_only(image_path, llm_config_id) dict
+        +async _collaborative(image_path, yolo_model_id, llm_config_id) dict
+    }
+
+    class ImageService {
+        +async crop_region(image_path, bbox) bytes
+        +async draw_bboxes(image_path, detections) str
+        +async encode_to_base64(image_path_or_bytes) str
+        +async save_upload(file, user_id, category) str
+        +async create_thumbnail(image_path, size) str
+    }
+
+    class VideoService {
+        +async extract_frames(video_path, frame_interval) List~str~
+        +async save_upload(file, user_id) str
+    }
+
+    DetectionService --> YOLOService : uses
+    DetectionService --> LLMService : uses
+    DetectionService --> ImageService : uses
+    DetectionService --> VideoService : uses
