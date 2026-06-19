@@ -1,0 +1,30 @@
+# 更新日志
+
+## [1.0.0] - 2026-06-19
+
+### ✨ 新增
+- **首页仪表盘**：ECharts 图表 — 近14天检测趋势（折线图）、检测数量（柱状图）、模式分布（饼图）
+- **LLM 图片分析提示词**：图片 LLM/协同模式支持自定义分析指令，与视频检测一致
+- **知识图谱节点查看**：点击图谱节点弹出关联文档段落
+- **智能问答任务可选**：QA 模式可不选任务直接对话，支持关联知识库
+- **Markdown 渲染**：AI 回复使用 Markdown 格式（标题、列表、代码高亮）
+
+### 🎨 UI 优化
+- **全屏适配**：移除所有页面 `max-w-* mx-auto` 居中约束，内容铺满屏幕
+- **对话界面铺满**：移除 `max-w-3xl` 限制
+- **左侧导航栏精简**：移除顶部 logo 和底部版本号
+- **思考过程自动折叠**：流式结束后思考区域自动收起
+- **减少知识图谱连线**：提高共现阈值，精简标签数量
+
+### 🐛 Bug 修复
+- **文档处理卡死**：修复 `process_document` 异常处理缺失，文档不再卡在「处理中」
+- **嵌入 API 批量限制**：DashScope 嵌入 API batch_size 限制 10，改为分批发送
+- **缺少 encoding_format**：DashScope 兼容模式补充 `encoding_format` 和 `text_type` 参数
+- **save_upload_file 参数缺失**：补上 `category` 分类参数
+- **文档预览解析**：改用原生解析器替代缓存文件，docx 支持表格内容提取
+- **PDF 解析增强**：块级文本提取，保留阅读顺序
+
+### 🔧 重构
+- **前端模块化**：`KBSidebar`、`KBDocumentTable`、`DocumentPreviewDialog` 独立组件
+- **桶导出完善**：`config/index.ts` 补上 `EmbeddingConfigDialog`；`components/index.ts` 添加 knowledge 路径
+- **提示词优化**：QA 和 RAG 模式均要求 LLM 使用 Markdown 格式回答
