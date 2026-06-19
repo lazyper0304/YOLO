@@ -19,12 +19,13 @@ import ultralytics.nn.tasks as ultralytics_tasks
 
 logger = logging.getLogger(__name__)
 
-# PyTorch 2.6+ 兼容：torch.load 默认 weights_only=True，YOLO 模型加载需要 weights_only=False
-# 同时处理旧版本模型文件引用已移除的 ultralytics.yolo 子模块
+# ─── YOLOv26 / ultralytics 8.4+ 兼容层 ──────────────────────────────────
+# 处理旧版本模型文件引用已移除的 ultralytics.yolo 子模块
+# 以及 PyTorch 2.6+ 的 weights_only 默认值变更
 def _setup_yolo_compat():
     import sys
 
-    # 为旧模型创建 ultralytics.yolo.* 虚拟模块别名
+    # 为旧模型创建 ultralytics.yolo.* 虚拟模块别名（YOLOv26 不再需要，但保持向后兼容）
     _yolo_aliases = {
         "ultralytics.yolo": "ultralytics.models.yolo",
         "ultralytics.yolo.utils": "ultralytics.utils",
@@ -50,7 +51,7 @@ def _setup_yolo_compat():
 
 _setup_yolo_compat()
 
-# ultralytics 8.2+ 兼容：C3k2 已在 block.py 中移除，映射到 C2f
+# C3k2 → C2f 兼容（ultralytics 8.2+, YOLOv26 同样需要）
 import ultralytics.nn.modules.block as _block
 if not hasattr(_block, "C3k2"):
     from ultralytics.nn.modules.block import C2f
@@ -59,7 +60,7 @@ if not hasattr(_block, "C3k2"):
 from app.config import settings
 
 
-def _run_yolo_inference(model_path: str, image_path: str, conf: float, device: str) -> list:
+def _run_yolo_inference(model_path: str, image_path: str, conf: float, device: str, end2end: bool = True) -> list:
     """Run YOLO inference in a separate process.
 
     This function is designed to be called via ProcessPoolExecutor.
@@ -72,7 +73,8 @@ def _run_yolo_inference(model_path: str, image_path: str, conf: float, device: s
 
     model = YOLO(model_path)
     model.to(device)
-    results = model(image_path, conf=conf)
+    # YOLOv26 end-to-end mode (default True): 使用一对一检测头，无需 NMS
+    results = model(image_path, conf=conf, end2end=end2end)
 
     detections = []
     for result in results:
@@ -142,7 +144,7 @@ class YOLOService:
             SETTINGS.update({
                 "datasets_dir": str(settings.yolo_models_dir),
                 "weights_dir": str(settings.yolo_models_dir),
-                "runs_dir": str(settings.yolo_models_dir),
+                "runs_dir": os.path.join(str(settings.yolo_models_dir), "runs"),
             })
         except Exception:
             pass
@@ -155,18 +157,24 @@ class YOLOService:
         return self._process_executor
 
     async def pre_download_models(self):
-        """Pre-download lightweight default models in the background (non-blocking)."""
+        """Pre-download lightweight default YOLOv26 models in the background (non-blocking)."""
         from ultralytics import YOLO
+
+        # YOLOv26 默认模型列表（仅在首次启动时下载）
+        startup_models = [
+            settings.YOLO_DEFAULT_MODEL,  # yolo26n.pt
+        ]
 
         async def _download(model_name: str):
             try:
                 if not os.path.exists(model_name):
+                    logger.info("Pre-downloading model: %s", model_name)
                     model = YOLO(model_name)
                     del model
             except Exception:
                 pass  # Silently skip download failures
 
-        tasks = [_download(m) for m in self._startup_models]
+        tasks = [_download(m) for m in startup_models]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def load_model(self, model_path: str) -> Any:
@@ -220,6 +228,7 @@ class YOLOService:
         model_path: str | None = None,
         confidence_threshold: float | None = None,
         use_process_pool: bool = True,
+        end2end: bool = True,
     ) -> list[dict]:
         """Run YOLO detection on an image and return bbox results.
 
@@ -233,6 +242,7 @@ class YOLOService:
             confidence_threshold: Detection confidence threshold
             use_process_pool: If True, run inference in ProcessPoolExecutor (recommended for CPU-bound work)
                              If False, run in thread pool (may be better for GPU-bound work with CUDA)
+            end2end: YOLOv26 one-to-one head mode (no NMS needed). Ignored by legacy models.
         """
         if model_path is None:
             raise ValueError("未选择YOLO模型，请上传并选择模型后进行检测")
@@ -246,10 +256,10 @@ class YOLOService:
 
         if use_process_pool and device == "cpu":
             # CPU-bound: use process pool to bypass GIL
-            return await self._detect_with_process_pool(image_path, model_path, conf, device)
+            return await self._detect_with_process_pool(image_path, model_path, conf, device, end2end)
         else:
             # GPU-bound or fallback: use model in memory with thread pool
-            return await self._detect_with_model(image_path, model_path, conf)
+            return await self._detect_with_model(image_path, model_path, conf, end2end)
 
     async def _detect_with_process_pool(
         self,
@@ -257,6 +267,7 @@ class YOLOService:
         model_path: str,
         conf: float,
         device: str,
+        end2end: bool = True,
     ) -> list[dict]:
         """Run detection in a separate process (best for CPU-bound inference)."""
         # Acquire per-model inference lock to serialize same-model concurrency
@@ -268,7 +279,7 @@ class YOLOService:
             try:
                 bboxes = await loop.run_in_executor(
                     self._process_executor,
-                    _run_yolo_inference, model_path, image_path, conf, device,
+                    _run_yolo_inference, model_path, image_path, conf, device, end2end,
                 )
                 return bboxes
             except Exception as e:
@@ -280,6 +291,7 @@ class YOLOService:
         image_path: str,
         model_path: str,
         conf: float,
+        end2end: bool = True,
     ) -> list[dict]:
         """Run detection using in-memory model (best for GPU-bound inference with CUDA)."""
         model = await self.load_model(model_path)
@@ -291,7 +303,7 @@ class YOLOService:
         async with self._inference_locks[model_path]:
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(
-                None, lambda: model(image_path, conf=conf)
+                None, lambda: model(image_path, conf=conf, end2end=end2end)
             )
 
         bboxes = []

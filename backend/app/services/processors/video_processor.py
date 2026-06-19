@@ -61,8 +61,14 @@ class VideoProcessor:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+            # 根据用户设置的帧间隔（秒）计算实际帧间隔数
+            interval_seconds = record.frame_interval_seconds or 5
+            interval_frames = max(1, int(fps * interval_seconds))
+
             fourcc = cv2.VideoWriter_fourcc(*'avc1')
-            out = cv2.VideoWriter(output_path, fourcc, fps / 5, (width, height))
+            # 输出视频的 FPS = 原 FPS / 采样间隔，即每秒输出的帧数
+            out_fps = max(1, fps / interval_frames)
+            out = cv2.VideoWriter(output_path, fourcc, out_fps, (width, height))
 
             all_detections: dict[str, list[dict]] = {}
             frame_idx = 0
@@ -74,7 +80,7 @@ class VideoProcessor:
                 if not ret:
                     break
 
-                if frame_idx % 5 == 0:
+                if frame_idx % interval_frames == 0:
                     fp = os.path.join(tmpdir, f"f{processed:06d}.jpg")
                     cv2.imwrite(fp, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     try:

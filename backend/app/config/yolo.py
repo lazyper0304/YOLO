@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class YOLOSettings:
-    YOLO_DEFAULT_MODEL: str = os.getenv("YOLO_DEFAULT_MODEL", "yolov8n.pt")
+    YOLO_DEFAULT_MODEL: str = os.getenv("YOLO_DEFAULT_MODEL", "yolo26n.pt")
     YOLO_CONFIDENCE_THRESHOLD: float = float(os.getenv("YOLO_CONFIDENCE_THRESHOLD", "0.25"))
     YOLO_DEVICE: str = os.getenv("YOLO_DEVICE", "auto")
     YOLO_MODELS_DIR: str = os.getenv("YOLO_MODELS_DIR", str(BASE_DIR / "models"))

@@ -46,7 +46,11 @@ class CameraIPProcessor:
         frame_count = 0
         detected_count = 0
         interval = record.frame_interval_seconds or 5
-        frames_per_interval = max(1, int(5 * interval))
+        # 获取摄像头实际 FPS，部分 IP 摄像头可能返回 0，则使用默认 30fps
+        cam_fps = cap.get(cv2.CAP_PROP_FPS)
+        if cam_fps <= 0:
+            cam_fps = 30.0
+        frames_per_interval = max(1, int(cam_fps * interval))
         frames: list[dict] = []
         frame_idx = 0
 

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.core.database import async_session_factory
 from app.config import settings
 from app.models import DetectionRecord
+from app.services.model_call_service import ModelCallService
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +271,27 @@ class TaskQueue:
 
                 await processor.process(fresh_record)
                 await proc_db.commit()
+
+                # Log model calls
+                try:
+                    call_svc = ModelCallService(proc_db)
+                    if fresh_record.mode in ("yolo_only", "collaborative"):
+                        await call_svc.log_call(
+                            user_id=fresh_record.user_id,
+                            model_type="yolo",
+                            model_config_id=fresh_record.yolo_model_id,
+                            ref_id=fresh_record.id,
+                        )
+                    if fresh_record.mode in ("llm_only", "collaborative"):
+                        await call_svc.log_call(
+                            user_id=fresh_record.user_id,
+                            model_type="llm",
+                            model_config_id=fresh_record.llm_config_id,
+                            ref_id=fresh_record.id,
+                        )
+                    await proc_db.commit()
+                except Exception:
+                    logger.warning("Failed to log model call for task %d", task_id, exc_info=True)
 
                 print(f"[TaskQueue] Task {task_id} completed successfully", flush=True)
                 logger.info("Task %d completed", task_id)

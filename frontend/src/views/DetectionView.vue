@@ -8,9 +8,10 @@ import { useConfigStore } from '@/stores/config'
 import { useKnowledgeBaseStore } from '@/stores/knowledge_base'
 import { useTaskList } from '@/composables/useTaskList'
 import { detectionApi } from '@/api/detection'
+import client from '@/api/client'
 import { getTask } from '@/api/tasks'
 import type { DetectionMode } from '@/types/detection'
-import { Delete, Refresh, Aim, MagicStick, Link } from '@element-plus/icons-vue'
+import { Delete, Refresh, Aim, MagicStick, Link, VideoCameraFilled } from '@element-plus/icons-vue'
 
 const detectionStore = useDetectionStore()
 const configStore = useConfigStore()
@@ -31,6 +32,13 @@ const webcamActive = ref(false)
 const webcamVideoRef = ref<HTMLVideoElement | null>(null)
 const webcamStream = ref<MediaStream | null>(null)
 const webcamCapturedFrame = ref<Blob | null>(null)
+
+// ── 本机摄像头实时检测 ──
+const webcamDetecting = ref(false)
+const webcamBBoxes = ref<{ x1: number; y1: number; x2: number; y2: number; confidence: number; class_name: string; class_id: number }[]>([])
+const webcamCanvasRef = ref<HTMLCanvasElement | null>(null)
+let webcamDetectTimer: ReturnType<typeof setInterval> | null = null
+let webcamAnimFrameId: number | null = null
 
 // Video config
 const frameIntervalSeconds = ref(5)
@@ -62,6 +70,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (webcamDetectTimer) clearInterval(webcamDetectTimer)
+  if (webcamAnimFrameId) cancelAnimationFrame(webcamAnimFrameId)
+  if (webcamStream.value) webcamStream.value.getTracks().forEach(t => t.stop())
 })
 
 // --- Dialog management ---
@@ -81,6 +92,9 @@ function openCreateDialog(mode: DetectionMode) {
   detectionStore.selectedLLMConfigId = null
   createFile.value = null; createFileName.value = ''; taskName.value = ''
   sourceType.value = 'image'; webcamActive.value = false; webcamCapturedFrame.value = null
+  webcamDetecting.value = false; webcamBBoxes.value = []
+  if (webcamDetectTimer) { clearInterval(webcamDetectTimer); webcamDetectTimer = null }
+  if (webcamAnimFrameId) { cancelAnimationFrame(webcamAnimFrameId); webcamAnimFrameId = null }
   frameIntervalSeconds.value = 5; analysisPrompt.value = ''
   estimatedFrameCount.value = 0; estimatedDurationSeconds.value = 0
   if (webcamStream.value) stopWebcam()
@@ -204,6 +218,79 @@ function captureWebcam() {
   c.getContext('2d')!.drawImage(video, 0, 0)
   c.toBlob(b => { if (b) { webcamCapturedFrame.value = b; createFileName.value = '摄像头截图.jpg' } }, 'image/jpeg', 0.9)
   ElMessage.success('已拍照')
+}
+
+// ── 本机摄像头实时 YOLO 检测 ──
+function startWebcamDetection() {
+  if (!detectionStore.selectedModelId) {
+    ElMessage.warning('请先选择 YOLO 模型')
+    return
+  }
+  webcamDetecting.value = true
+  webcamBBoxes.value = []
+  runWebcamDetect()
+  webcamDetectTimer = setInterval(runWebcamDetect, 500)
+  drawBBoxLoop()
+}
+
+function stopWebcamDetection() {
+  webcamDetecting.value = false
+  if (webcamDetectTimer) { clearInterval(webcamDetectTimer); webcamDetectTimer = null }
+  if (webcamAnimFrameId) { cancelAnimationFrame(webcamAnimFrameId); webcamAnimFrameId = null }
+  webcamBBoxes.value = []
+  // 清除画布
+  const canvas = webcamCanvasRef.value
+  if (canvas) {
+    const ctx = canvas.getContext('2d')
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+}
+
+async function runWebcamDetect() {
+  const video = webcamVideoRef.value
+  if (!video || !video.videoWidth) return
+  const c = document.createElement('canvas')
+  c.width = video.videoWidth; c.height = video.videoHeight
+  c.getContext('2d')!.drawImage(video, 0, 0)
+  const blob = await new Promise<Blob | null>(resolve => c.toBlob(b => resolve(b), 'image/jpeg', 0.85))
+  if (!blob) return
+  const form = new FormData()
+  form.append('file', blob, 'webcam.jpg')
+  form.append('model_id', String(detectionStore.selectedModelId))
+  try {
+    const { data } = await client.post('/api/detection/realtime', form)
+    webcamBBoxes.value = data.data?.bboxes || []
+  } catch { /* ignore */ }
+}
+
+function drawBBoxLoop() {
+  const canvas = webcamCanvasRef.value
+  const video = webcamVideoRef.value
+  if (!canvas || !video) { webcamAnimFrameId = requestAnimationFrame(drawBBoxLoop); return }
+  // 保持画布尺寸与视频一致
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  for (const b of webcamBBoxes.value) {
+    const x = b.x1; const y = b.y1; const w = b.x2 - b.x1; const h = b.y2 - b.y1
+    ctx.strokeStyle = '#00ff00'
+    ctx.lineWidth = 2
+    ctx.strokeRect(x, y, w, h)
+    ctx.fillStyle = '#00ff00'
+    ctx.font = '14px sans-serif'
+    const label = `${b.class_name} ${Math.round(b.confidence * 100)}%`
+    const tw = ctx.measureText(label).width
+    ctx.fillRect(x, y - 18, tw + 6, 18)
+    ctx.fillStyle = '#000'
+    ctx.fillText(label, x + 3, y - 4)
+  }
+  if (webcamDetecting.value) {
+    webcamAnimFrameId = requestAnimationFrame(drawBBoxLoop)
+  }
 }
 
 // --- Status helpers ---
@@ -350,16 +437,34 @@ const hasRunning = computed(() => taskList.runningTasks.value.length > 0)
         </template>
         <template v-if="sourceType === 'webcam'">
           <div class="relative bg-black rounded-lg overflow-hidden" style="height: 260px">
-            <video ref="webcamVideoRef" class="w-full h-full object-cover absolute inset-0" autoplay playsinline muted />
-            <div v-if="!webcamActive" class="absolute inset-0 flex items-center justify-center bg-gray-900">
+            <video ref="webcamVideoRef" class="w-full h-full object-contain absolute inset-0" autoplay playsinline muted />
+            <canvas ref="webcamCanvasRef" class="w-full h-full object-contain absolute inset-0 pointer-events-none" />
+            <div v-if="!webcamActive" class="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80 z-10">
               <el-button type="primary" size="small" @click="startWebcam">开启摄像头</el-button>
+            </div>
+            <div v-if="webcamDetecting" class="absolute top-2 left-2 z-10 flex items-center gap-1.5 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+              <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              实时检测中
+              <span class="text-gray-300 ml-1">({{ webcamBBoxes.length }}个目标)</span>
             </div>
           </div>
           <div class="flex gap-2 mt-2 flex-wrap">
-            <el-button v-if="!webcamActive" type="primary" size="small" @click="startWebcam">开启</el-button>
-            <el-button v-if="webcamActive" size="small" @click="captureWebcam">拍照</el-button>
-            <el-button v-if="webcamActive" type="danger" size="small" plain @click="stopWebcam()">关闭</el-button>
+            <template v-if="!webcamActive">
+              <el-button type="primary" size="small" @click="startWebcam">开启</el-button>
+            </template>
+            <template v-else>
+              <el-button size="small" @click="captureWebcam">拍照</el-button>
+              <el-button v-if="!webcamDetecting" type="success" size="small" :icon="VideoCameraFilled"
+                :disabled="!detectionStore.selectedModelId" @click="startWebcamDetection">
+                实时检测
+              </el-button>
+              <el-button v-else type="warning" size="small" plain @click="stopWebcamDetection">
+                停止检测
+              </el-button>
+              <el-button type="danger" size="small" plain @click="stopWebcam(); stopWebcamDetection()">关闭</el-button>
+            </template>
           </div>
+          <div v-if="!detectionStore.selectedModelId && webcamActive" class="text-xs text-orange-500 mt-1">请先选择 YOLO 模型以启用实时检测</div>
           <div v-if="webcamCapturedFrame" class="text-xs text-green-600 mt-1">已拍照 ✓</div>
         </template>
       </div>

@@ -22,6 +22,8 @@ from app.services.chunking_service import split_text
 from app.services.image_parser import ImageParser
 from app.services.llm_service import LLMService
 from app.services.kb_progress import set_progress, delete_progress
+from app.services.model_call_service import ModelCallService
+from app.services.dedup_service import DedupService
 from app.utils.file_utils import save_upload_file
 
 logger = logging.getLogger(__name__)
@@ -129,6 +131,12 @@ class DocumentService:
             ocr_text = await self._try_ocr(doc)
             if ocr_text and ocr_text.strip():
                 text = ocr_text
+                # Log OCR call for images
+                try:
+                    call_svc = ModelCallService(self.db)
+                    await call_svc.log_call(user_id=doc.user_id, model_type="ocr", ref_id=doc.id)
+                except Exception:
+                    pass
             else:
                 text = await self._parse_image_document(doc)
         elif doc.file_type == ".pdf":
@@ -137,6 +145,12 @@ class DocumentService:
             ocr_text = await self._try_ocr(doc)
             if ocr_text and ocr_text.strip():
                 text = ocr_text
+                # Log OCR call for PDFs
+                try:
+                    call_svc = ModelCallService(self.db)
+                    await call_svc.log_call(user_id=doc.user_id, model_type="ocr", ref_id=doc.id)
+                except Exception:
+                    pass
             # If still no text, try parsing via multimodal LLM page by page
             if not text.strip():
                 text = await self._parse_pdf_as_images(doc)
@@ -158,11 +172,27 @@ class DocumentService:
             await delete_progress(doc.id)
             return
 
+        # ── 去重：移除与知识库现有 chunk 重复的文本片段 ──
+        deduper = DedupService(self.db)
+        chunks, skipped = await deduper.dedup_chunks(chunks, doc.knowledge_base_id)
+        if not chunks:
+            doc.status = "completed"
+            doc.chunk_count = 0
+            await self.db.flush()
+            kb_result = await self.db.execute(
+                select(KnowledgeBase).where(KnowledgeBase.id == doc.knowledge_base_id)
+            )
+            kb = kb_result.scalar_one_or_none()
+            if kb:
+                kb.document_count = max(0, (kb.document_count or 0))
+            await delete_progress(doc.id)
+            return
+
         texts = [c["content"] for c in chunks]
         await set_progress(
             doc.id, "embedding", 40,
-            f"正在生成向量嵌入，共 {len(chunks)} 个文本块...",
-            extra={"chunk_count": len(chunks)},
+            f"正在生成向量嵌入，共 {len(chunks)} 个文本块（已跳过 {skipped} 个重复项）...",
+            extra={"chunk_count": len(chunks), "dedup_skipped": skipped},
         )
         try:
             embedder = EmbeddingService()
@@ -170,6 +200,15 @@ class DocumentService:
                 embedder.embed_texts(texts),
                 timeout=settings.EMBEDDING_TIMEOUT_SECONDS,
             )
+            # Log embedding calls (one batch = one embedding call per chunk)
+            try:
+                call_svc = ModelCallService(self.db)
+                await call_svc.log_call(
+                    user_id=doc.user_id, model_type="embedding",
+                    ref_id=doc.id, metadata_json={"chunk_count": len(embeddings)},
+                )
+            except Exception:
+                pass
         except asyncio.TimeoutError:
             raise TimeoutError("嵌入API调用超时(120s)，请检查嵌入模型配置")
 

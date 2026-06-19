@@ -207,10 +207,26 @@ CREATE TABLE ocr_configs (
   CONSTRAINT ocr_configs_ibfk_1 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── 模型调用日志 ────────────────────────────────────────────────────────
+CREATE TABLE model_call_logs (
+  id                INT           NOT NULL AUTO_INCREMENT,
+  user_id           INT           NOT NULL,
+  model_type        VARCHAR(20)   NOT NULL COMMENT '模型类型: yolo / llm / ocr / embedding',
+  model_config_id   INT           NULL COMMENT '对应配置表的主键 ID, 可选',
+  ref_id            INT           NULL COMMENT '关联的业务记录 ID, 可选',
+  metadata_json     JSON          NULL,
+  created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX ix_model_call_logs_user_id (user_id),
+  INDEX ix_model_call_logs_model_type (model_type),
+  INDEX ix_model_call_logs_created_at (created_at),
+  CONSTRAINT model_call_logs_ibfk_1 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Alembic 版本号 ───────────────────────────────────────────────────────
 CREATE TABLE alembic_version (
   version_num VARCHAR(32) NOT NULL,
   PRIMARY KEY (version_num)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO alembic_version (version_num) VALUES ('c853a95e4e86');
+INSERT INTO alembic_version (version_num) VALUES ('0002');

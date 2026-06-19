@@ -25,6 +25,7 @@ from app.models.user import Base
 from app.models.llm_config import LLMConfig
 from app.models.yolo_model import YOLOModel
 from app.models.detection_record import DetectionRecord
+from app.models.model_call_log import ModelCallLog
 
 target_metadata = Base.metadata
 

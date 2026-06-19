@@ -7,9 +7,10 @@ from app.models.detection_record import DetectionRecord
 from app.models.knowledge_base import KnowledgeBase, KBDocument, KBChunk
 from app.models.embedding_config import EmbeddingModelConfig
 from app.models.ocr_config import OCRConfig
+from app.models.model_call_log import ModelCallLog
 
 __all__ = [
     "User", "LLMConfig", "YOLOModel", "DetectionRecord",
     "KnowledgeBase", "KBDocument", "KBChunk",
-    "EmbeddingModelConfig", "OCRConfig",
+    "EmbeddingModelConfig", "OCRConfig", "ModelCallLog",
 ]
