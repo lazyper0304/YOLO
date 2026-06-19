@@ -32,3 +32,8 @@ export async function fetchModePie(): Promise<PieData> {
   const res = await client.get('/api/dashboard/mode-pie')
   return res.data.data
 }
+
+export async function fetchModelCalls(): Promise<PieData> {
+  const res = await client.get('/api/dashboard/model-calls')
+  return res.data.data
+}

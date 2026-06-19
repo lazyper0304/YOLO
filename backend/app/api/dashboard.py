@@ -50,3 +50,14 @@ async def mode_pie(
     service = DashboardService(db)
     data = await service.get_mode_pie(current_user.id)
     return success_response(data=data)
+
+
+@router.get("/model-calls")
+async def model_calls(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return model call counts (YOLO/LLM/OCR/Embedding) for pie chart."""
+    service = DashboardService(db)
+    data = await service.get_model_calls(current_user.id)
+    return success_response(data=data)

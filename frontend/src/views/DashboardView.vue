@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { fetchDashboardStats, fetchDailyStats, fetchModePie, type DashboardData } from '@/api/dashboard'
+import { fetchDashboardStats, fetchDailyStats, fetchModePie, fetchModelCalls, type DashboardData } from '@/api/dashboard'
 import { getSystemStatus } from '@/api/system'
 import { LayoutShell } from '@/components'
 import { Monitor, TrendCharts, Setting, Cpu } from '@element-plus/icons-vue'
@@ -17,14 +17,15 @@ const stats = ref<DashboardData>({
 
 const dailyData = ref<{ dates: string[]; counts: number[] }>({ dates: [], counts: [] })
 const pieData = ref<{ name: string; value: number }[]>([])
+const modelCallsData = ref<{ name: string; value: number }[]>([])
 
 const chartRef = ref<HTMLDivElement | null>(null)
 const barRef = ref<HTMLDivElement | null>(null)
-const pieRef = ref<HTMLDivElement | null>(null)
+const modelCallsRef = ref<HTMLDivElement | null>(null)
 
 let chartLine: echarts.ECharts | null = null
 let chartBar: echarts.ECharts | null = null
-let chartPie: echarts.ECharts | null = null
+let chartModelCalls: echarts.ECharts | null = null
 
 // ── 实时监控 ──
 const cpuPercent = ref(0)
@@ -47,12 +48,14 @@ onMounted(async () => {
 
   // Fetch chart data
   try {
-    const [dailyRes, pieRes] = await Promise.all([
+    const [dailyRes, pieRes, modelCallsRes] = await Promise.all([
       fetchDailyStats(14),
       fetchModePie(),
+      fetchModelCalls(),
     ])
     dailyData.value = dailyRes
     pieData.value = pieRes.series || []
+    modelCallsData.value = modelCallsRes.series || []
   } catch { /* ignore */ }
 
   await nextTick()
@@ -66,7 +69,7 @@ onMounted(async () => {
 onUnmounted(() => {
   chartLine?.dispose()
   chartBar?.dispose()
-  chartPie?.dispose()
+  chartModelCalls?.dispose()
   chartCpu?.dispose()
   chartMem?.dispose()
   if (monitorTimer) clearInterval(monitorTimer)
@@ -213,17 +216,17 @@ function initCharts() {
     })
   }
 
-  // Pie chart — mode breakdown
-  if (pieRef.value) {
-    chartPie = echarts.init(pieRef.value)
-    const colors = ['#3b82f6', '#22c55e', '#a855f7']
-    chartPie.setOption({
+  // Pie chart — model calls (YOLO / LLM / OCR / Embedding)
+  if (modelCallsRef.value) {
+    chartModelCalls = echarts.init(modelCallsRef.value)
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6']
+    chartModelCalls.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)' },
       series: [{
         type: 'pie',
         radius: ['40%', '70%'],
         center: ['50%', '50%'],
-        data: pieData.value,
+        data: modelCallsData.value,
         label: { show: true, fontSize: 11 },
         emphasis: {
           itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.2)' },
@@ -302,10 +305,18 @@ const cards = computed(() => [
           <h3 class="text-sm font-semibold text-gray-500 mb-3">近14天检测数量</h3>
           <div ref="barRef" style="height:220px"></div>
         </div>
-        <!-- Pie chart -->
+        <!-- Pie chart — model calls -->
         <div class="bg-white rounded-lg shadow-sm p-4">
-          <h3 class="text-sm font-semibold text-gray-500 mb-3">检测模式分布</h3>
-          <div ref="pieRef" style="height:220px"></div>
+          <h3 class="text-sm font-semibold text-gray-500 mb-3">模型调用次数</h3>
+          <div ref="modelCallsRef" style="height:200px"></div>
+          <div class="flex justify-center gap-4 mt-1 text-xs text-gray-400">
+            <span v-for="item in modelCallsData" :key="item.name" class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full inline-block"
+                :style="{ background: ['#3b82f6','#22c55e','#f59e0b','#8b5cf6'][['YOLO','LLM','OCR','嵌入模型'].indexOf(item.name)] || '#999' }">
+              </span>
+              {{ item.name }}: {{ item.value }}
+            </span>
+          </div>
         </div>
         <!-- Recent detections -->
         <div class="bg-white rounded-lg shadow-sm p-4">

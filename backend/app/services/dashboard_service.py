@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models import DetectionRecord, YOLOModel, LLMConfig
+from app.models import DetectionRecord, YOLOModel, LLMConfig, KBDocument, KBChunk
 
 
 class DashboardService:
@@ -134,5 +134,52 @@ class DashboardService:
             "series": [
                 {"name": labels_map.get(k, k), "value": v}
                 for k, v in mode_counts.items()
+            ]
+        }
+
+    async def get_model_calls(self, user_id: int) -> dict:
+        """Return call counts for each model type (YOLO/LLM/OCR/Embedding)."""
+        # YOLO calls: detection records that used YOLO (yolo_only + collaborative)
+        yolo_cnt = await self.db.execute(
+            select(func.count(DetectionRecord.id)).where(
+                DetectionRecord.user_id == user_id,
+                DetectionRecord.mode.in_(["yolo_only", "collaborative"]),
+            )
+        )
+        yolo_calls = yolo_cnt.scalar() or 0
+
+        # LLM calls: detection records that used LLM (llm_only + collaborative)
+        llm_cnt = await self.db.execute(
+            select(func.count(DetectionRecord.id)).where(
+                DetectionRecord.user_id == user_id,
+                DetectionRecord.mode.in_(["llm_only", "collaborative"]),
+            )
+        )
+        llm_calls = llm_cnt.scalar() or 0
+
+        # OCR calls: KB documents processed (each document may trigger OCR)
+        ocr_cnt = await self.db.execute(
+            select(func.count(KBDocument.id)).where(
+                KBDocument.user_id == user_id,
+            )
+        )
+        ocr_calls = ocr_cnt.scalar() or 0
+
+        # Embedding calls: KB chunks created (each chunk = one embedding vector)
+        embed_cnt = await self.db.execute(
+            select(func.count(KBChunk.id)).select_from(KBChunk).join(
+                KBDocument, KBChunk.document_id == KBDocument.id
+            ).where(
+                KBDocument.user_id == user_id,
+            )
+        )
+        embed_calls = embed_cnt.scalar() or 0
+
+        return {
+            "series": [
+                {"name": "YOLO", "value": yolo_calls},
+                {"name": "LLM", "value": llm_calls},
+                {"name": "OCR", "value": ocr_calls},
+                {"name": "嵌入模型", "value": embed_calls},
             ]
         }
