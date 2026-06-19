@@ -38,12 +38,13 @@ export const detectionApi = {
   },
 
   /** Generate an analysis prompt via LLM conversation. */
-  generatePrompt(requirement: string, llmConfigId?: number | null) {
+  generatePrompt(requirement: string, llmConfigId?: number | null, kbIds?: number[]) {
     return client.post<ApiResponse<GeneratedPrompt>>(
       '/api/chat/generate-prompt',
       {
         requirement,
         llm_config_id: llmConfigId,
+        kb_ids: kbIds?.length ? kbIds.join(',') : undefined,
       },
       { params: { token: localStorage.getItem('access_token') || '' } }
     )

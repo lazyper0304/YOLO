@@ -293,6 +293,7 @@ async def chat_stream(
 class GeneratePromptRequest(BaseModel):
     requirement: str  # 用户自然语言描述
     llm_config_id: int | None = None
+    kb_ids: str | None = None  # 逗号分隔的知识库ID
 
 
 @router.post("/generate-prompt", response_model=dict)
@@ -339,6 +340,20 @@ async def generate_analysis_prompt(
 
     api_url = llm_config.api_base_url.rstrip("/")
 
+    # Inject KB context if provided
+    kb_context = ""
+    if req.kb_ids:
+        try:
+            from app.services.retrieval_service import RetrievalService
+            parsed_kb_ids = [int(x.strip()) for x in req.kb_ids.split(",") if x.strip()]
+            if parsed_kb_ids:
+                retrieval = RetrievalService()
+                results = await retrieval.search(kb_ids=parsed_kb_ids, query=req.requirement, top_k=3)
+                if results:
+                    kb_context = "\n参考资料（来自知识库）：\n" + retrieval.build_context(results, max_tokens=800) + "\n"
+        except Exception:
+            pass  # KB errors ignored
+
     # Build meta-prompt for generating analysis prompts
     meta_prompt = (
         "你是一个专业的视频分析助手。用户将描述他们想要分析视频的需求，"
@@ -352,7 +367,8 @@ async def generate_analysis_prompt(
         "- 长度控制在200-500字\n"
         "- 清晰、具体、可执行\n"
         "- 适合发送给多模态视觉大模型逐帧分析\n\n"
-        f"用户的视频分析需求：\n{req.requirement}\n\n"
+        f"用户的视频分析需求：\n{req.requirement}\n"
+        f"{kb_context}\n"
         "请直接输出生成的提示词，不要添加任何前缀说明。"
     )
 

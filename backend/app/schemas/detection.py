@@ -58,6 +58,7 @@ class GeneratePromptRequest(BaseModel):
     """Request for LLM to generate an analysis prompt."""
     requirement: str  # 用户自然语言描述的分析需求
     llm_config_id: int | None = None
+    kb_ids: str | None = None  # 逗号分隔的知识库ID
 
 
 class AnalyzeFrameRequest(BaseModel):

@@ -276,6 +276,7 @@ from app.api.chat import router as chat_router
 from app.api.knowledge_base import router as knowledge_base_router
 from app.api.rag_chat import router as rag_chat_router
 from app.api.embedding_config import router as embedding_config_router
+from app.api.ocr_config import router as ocr_config_router
 
 app.include_router(auth_router)
 app.include_router(llm_config_router)
@@ -290,3 +291,4 @@ app.include_router(chat_router)
 app.include_router(knowledge_base_router)
 app.include_router(rag_chat_router)
 app.include_router(embedding_config_router)
+app.include_router(ocr_config_router)

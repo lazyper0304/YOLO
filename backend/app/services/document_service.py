@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -14,6 +14,7 @@ from app.core.database import async_session_factory
 from app.core import decrypt_api_key
 from app.models.knowledge_base import KnowledgeBase, KBDocument, KBChunk
 from app.models.llm_config import LLMConfig
+from app.models.ocr_config import OCRConfig
 from app.services.chroma_service import ChromaService
 from app.services.embedding_service import EmbeddingService
 from app.services.document_parser import parse_document
@@ -124,7 +125,21 @@ class DocumentService:
         await set_progress(doc.id, "parsing", 5, "开始解析文档...")
 
         if doc.file_type in ALLOWED_IMAGE_EXTENSIONS:
-            text = await self._parse_image_document(doc)
+            # Try OCR first if an active config exists, fall back to multimodal LLM
+            ocr_text = await self._try_ocr(doc)
+            if ocr_text and ocr_text.strip():
+                text = ocr_text
+            else:
+                text = await self._parse_image_document(doc)
+        elif doc.file_type == ".pdf":
+            text = parse_document(doc.file_path, doc.file_type)
+            # Always try OCR for PDFs when active config exists
+            ocr_text = await self._try_ocr(doc)
+            if ocr_text and ocr_text.strip():
+                text = ocr_text
+            # If still no text, try parsing via multimodal LLM page by page
+            if not text.strip():
+                text = await self._parse_pdf_as_images(doc)
         else:
             text = parse_document(doc.file_path, doc.file_type)
 
@@ -210,6 +225,123 @@ class DocumentService:
 
         await delete_progress(doc.id)
 
+    async def _try_ocr(self, doc: KBDocument) -> str | None:
+        """Try OCR on the document if an active OCR config exists."""
+        try:
+            ocr_result = await self.db.execute(
+                select(OCRConfig).where(
+                    OCRConfig.user_id == doc.user_id,
+                    OCRConfig.is_active == True,
+                )
+            )
+            ocr_config = ocr_result.scalar_one_or_none()
+            if not ocr_config:
+                return None
+
+            from app.services.ocr_service import OCRService
+            from app.core import decrypt_api_key
+            ocr = OCRService()
+            api_url = ocr_config.api_base_url
+            api_key = decrypt_api_key(ocr_config.api_key) if ocr_config.api_key else None
+
+            if doc.file_type in ALLOWED_IMAGE_EXTENSIONS or doc.file_type == ".pdf":
+                # For images: send directly; for PDFs: convert pages to images
+                if doc.file_type == ".pdf":
+                    import fitz
+                    pdf = fitz.open(doc.file_path)
+                    texts = []
+                    for page_num in range(len(pdf)):
+                        page = pdf[page_num]
+                        pix = page.get_pixmap(dpi=250)
+                        img_bytes = pix.tobytes("png")
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                            tmp.write(img_bytes)
+                            tmp_path = tmp.name
+                        try:
+                            page_text = await ocr.extract_text(tmp_path, api_base_url=api_url, api_key=api_key)
+                            if page_text.strip():
+                                texts.append(f"--- 第 {page_num + 1} 页 ---\n{page_text}")
+                        finally:
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                    pdf.close()
+                    if not texts:
+                        return None  # OCR returned nothing for all pages
+                    return "\n\n".join(texts)
+                else:
+                    text = await ocr.extract_text(doc.file_path, api_base_url=api_url, api_key=api_key)
+                    return text
+        except Exception as e:
+            logger.warning("OCR failed for doc %d: %s", doc.id, e)
+        return None
+
+    async def _parse_pdf_as_images(self, doc: KBDocument) -> str:
+        """Parse a PDF by rendering each page as an image and using multimodal LLM."""
+        try:
+            import fitz
+            pdf = fitz.open(doc.file_path)
+        except Exception:
+            return ""
+
+        from app.services.llm_service import LLMService
+        import base64
+
+        result = await self.db.execute(
+            select(LLMConfig).where(
+                LLMConfig.user_id == doc.user_id,
+                LLMConfig.is_active == True,
+            )
+        )
+        llm_config = result.scalar_one_or_none()
+        if llm_config is None:
+            pdf.close()
+            return ""
+
+        try:
+            api_key = decrypt_api_key(llm_config.api_key)
+        except Exception:
+            pdf.close()
+            return ""
+
+        llm_service = LLMService()
+        pages_text = []
+        max_pages = min(len(pdf), 30)  # Limit to 30 pages to avoid excessive LLM cost
+
+        for i in range(max_pages):
+            page = pdf[i]
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+            prompt = (
+                "请提取这张图片中的全部文字内容，不要遗漏任何文字。"
+                "如果图片中没有文字，请回复{\"summary\": \"(无文字)\"}。"
+                "请以JSON格式返回: {\"summary\": \"提取到的完整文字\"}"
+            )
+
+            try:
+                result = await llm_service.analyze_image(
+                    api_base_url=llm_config.api_base_url,
+                    api_key=api_key,
+                    model_name=llm_config.model_name,
+                    image_base64=img_b64,
+                    provider=llm_config.provider,
+                    prompt=prompt,
+                )
+                # analyze_image returns a dict; extract text from summary or detailed_analysis
+                raw = (result.get("summary") or result.get("detailed_analysis") or "").strip()
+                clean = raw.replace("(无文字)", "").replace('{"summary": "(无文字)"}', "").strip()
+                if clean:
+                    pages_text.append(f"--- 第 {i + 1} 页 ---\n{clean}")
+            except Exception as e:
+                logger.warning("LLM page parsing failed for page %d: %s", i + 1, e)
+
+        pdf.close()
+        return "\n\n".join(pages_text)
+
     async def _parse_image_document(self, doc: KBDocument) -> str:
         """Parse an image document via multimodal LLM."""
         result = await self.db.execute(
@@ -294,6 +426,14 @@ class DocumentService:
         await self.db.execute(
             KBChunk.__table__.delete().where(KBChunk.document_id == doc_id)
         )
+
+        # Decrement KB chunk_count
+        kb_result = await self.db.execute(
+            select(KnowledgeBase).where(KnowledgeBase.id == doc.knowledge_base_id)
+        )
+        kb = kb_result.scalar_one_or_none()
+        if kb:
+            kb.chunk_count = max(0, (kb.chunk_count or 0) - (doc.chunk_count or 0))
         await self.db.flush()
 
         doc.status = "pending"
@@ -308,11 +448,22 @@ class DocumentService:
         if doc is None:
             raise ValueError("文档不存在")
 
+        file_url = None
+        if doc.file_path and os.path.exists(doc.file_path):
+            from app.config import settings
+            rel_path = Path(doc.file_path).as_posix()
+            if "uploads" in rel_path:
+                file_url = "/uploads/" + rel_path.split("uploads/", 1)[-1]
+            else:
+                file_url = "/uploads/" + Path(doc.file_path).name
+            file_url = f"http://localhost:{settings.BACKEND_PORT}{file_url}"
+
         if doc.file_type in ALLOWED_IMAGE_EXTENSIONS:
             return {
                 "doc_id": doc.id, "filename": doc.filename, "file_type": doc.file_type,
                 "file_size": doc.file_size, "status": doc.status,
                 "content_preview": "[图片] 图片文档已解析为文本描述并存储为片段",
+                "file_url": file_url,
                 "chunks": [],
             }
 
@@ -343,11 +494,12 @@ class DocumentService:
             "doc_id": doc.id, "filename": doc.filename, "file_type": doc.file_type,
             "file_size": doc.file_size, "status": doc.status,
             "content_preview": content_preview[:30000],
+            "file_url": file_url,
             "chunks": [],
         }
 
     async def get_kb_stats(self, kb_id: int) -> dict:
-        """Get knowledge base statistics."""
+        """Get knowledge base statistics from real DB counts."""
         result = await self.db.execute(
             select(func.count(KBDocument.id)).where(KBDocument.knowledge_base_id == kb_id)
         )
@@ -358,6 +510,19 @@ class DocumentService:
         )
         chunk_count = chunk_result.scalar() or 0
         return {"document_count": doc_count, "chunk_count": chunk_count}
+
+    async def sync_kb_counts(self, kb_id: int) -> None:
+        """Recalculate and sync KB document_count and chunk_count from real data."""
+        stats = await self.get_kb_stats(kb_id)
+        await self.db.execute(
+            update(KnowledgeBase)
+            .where(KnowledgeBase.id == kb_id)
+            .values(
+                document_count=stats["document_count"],
+                chunk_count=stats["chunk_count"],
+            )
+        )
+        await self.db.flush()
 
     async def _build_rag_context(self, kb_ids: list[int], query: str) -> str:
         """Build RAG context from knowledge bases (for collaborative analysis mode)."""

@@ -5,6 +5,7 @@ import ModelSelector from '@/components/detection/ModelSelector.vue'
 import { LayoutShell } from '@/components'
 import { useDetectionStore } from '@/stores/detection'
 import { useConfigStore } from '@/stores/config'
+import { useKnowledgeBaseStore } from '@/stores/knowledge_base'
 import { useTaskList } from '@/composables/useTaskList'
 import { detectionApi } from '@/api/detection'
 import { getTask } from '@/api/tasks'
@@ -13,6 +14,7 @@ import { Delete, Refresh, Aim, MagicStick, Link } from '@element-plus/icons-vue'
 
 const detectionStore = useDetectionStore()
 const configStore = useConfigStore()
+const kbStore = useKnowledgeBaseStore()
 const taskList = useTaskList()
 
 const tasks = taskList.tasks
@@ -34,6 +36,7 @@ const webcamCapturedFrame = ref<Blob | null>(null)
 const frameIntervalSeconds = ref(5)
 const analysisPrompt = ref('')
 const generatingPrompt = ref(false)
+const selectedPromptKBIds = ref<number[]>([])
 const estimatedFrameCount = ref(0)
 const estimatedDurationSeconds = ref(0)
 
@@ -125,7 +128,7 @@ async function generatePrompt() {
   if (!analysisPrompt.value.trim()) { ElMessage.warning('请先描述您的视频分析需求'); return }
   generatingPrompt.value = true
   try {
-    const res = await detectionApi.generatePrompt(analysisPrompt.value, detectionStore.selectedLLMConfigId)
+    const res = await detectionApi.generatePrompt(analysisPrompt.value, detectionStore.selectedLLMConfigId, selectedPromptKBIds.value)
     analysisPrompt.value = res.data.data?.prompt || ''
     ElMessage.success('提示词已生成')
   } catch (err: any) { ElMessage.error(err?.message || '生成失败') }
@@ -393,6 +396,7 @@ const hasRunning = computed(() => taskList.runningTasks.value.length > 0)
         <el-input v-model="analysisPrompt" type="textarea" :rows="sourceType === 'image' ? 2 : 2" placeholder="描述你希望LLM分析什么..." size="small" />
         <div class="mt-1">
           <el-button size="small" :loading="generatingPrompt" @click="generatePrompt" :disabled="configStore.llmConfigs.length === 0">从对话生成提示词</el-button>
+          <el-select v-model="selectedPromptKBIds" multiple collapse-tags collapse-tags-tooltip placeholder="参考知识库" size="small" style="width:150px" clearable><el-option v-for="kb in kbStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id"/></el-select>
           <span v-if="configStore.llmConfigs.length === 0" class="text-xs text-orange-500 ml-2">请先在模型算法管理中配置LLM</span>
         </div>
       </div>

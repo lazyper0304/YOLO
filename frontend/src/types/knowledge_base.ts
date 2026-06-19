@@ -153,6 +153,7 @@ export interface DocPreviewResponse {
   file_size: number
   status: string
   content_preview: string
+  file_url: string | null  // file download URL (PDF/images)
   chunks: Array<{ index: number; content_preview: string; token_count: number }>
 }
 

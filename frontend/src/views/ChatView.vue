@@ -81,7 +81,7 @@ async function saveRAGHistory() { const kbId=primaryKBId();const sid=activeSessi
 async function clearRAGChat() { const kbId=primaryKBId();const sid=activeSessionId.value;if(kbId&&sid){try{await knowledgeBaseApi.clearRAGHistory(kbId,sid);const s=sessions.value.find(x=>x.session_id===sid);if(s)s.message_count=0}catch{/* */}}messages.value=[] }
 watch(()=>selectedKBIds.value,async(n,o)=>{const np=n[0]||null;const op=o[0]||null;if(np!==op){activeSessionId.value=null;messages.value=[];sessions.value=[];if(np)await loadSessions()}},{deep:true})
 function switchMode(m:'qa'|'prompt'|'rag') { activeMode.value=m; if(m==='prompt'){messages.value=[];promptRequirement.value='';generatedPrompt.value=''} }
-async function generatePrompt() { if(!promptRequirement.value.trim()){ElMessage.warning('请描述分析需求');return} promptGenerating.value=true;generatedPrompt.value='';try{const r=await detectionApi.generatePrompt(promptRequirement.value,selectedLLMId.value);generatedPrompt.value=r.data.data?.prompt||'';ElMessage.success('已生成')}catch(e:any){ElMessage.error(e?.message||'生成失败')}finally{promptGenerating.value=false} }
+async function generatePrompt() { if(!promptRequirement.value.trim()){ElMessage.warning('请描述分析需求');return} promptGenerating.value=true;generatedPrompt.value='';try{const r=await detectionApi.generatePrompt(promptRequirement.value,selectedLLMId.value,selectedKBIds.value);generatedPrompt.value=r.data.data?.prompt||'';ElMessage.success('已生成')}catch(e:any){ElMessage.error(e?.message||'生成失败')}finally{promptGenerating.value=false} }
 function copyPrompt() { if(generatedPrompt.value) navigator.clipboard.writeText(generatedPrompt.value).then(()=>ElMessage.success('已复制')).catch(()=>ElMessage.warning('复制失败')) }
 function modeTitle() { return ({qa:'智能问答',prompt:'生成分析提示词',rag:'知识库问答'})[activeMode.value] }
 function toggleReasoning(msg:Message) { msg.reasoningExpanded = msg.reasoningExpanded===false ? true : false }
@@ -222,6 +222,7 @@ function toggleReasoning(msg:Message) { msg.reasoningExpanded = msg.reasoningExp
               <div class="flex items-center gap-2">
                 <el-button type="primary" :icon="MagicStick" :loading="promptGenerating" @click="generatePrompt" :disabled="!promptRequirement.trim()">{{ promptGenerating?'生成中...':'生成提示词' }}</el-button>
                 <el-select v-model="selectedLLMId" placeholder="LLM（可选）" size="small" style="width:150px" clearable><el-option v-for="c in configStore.llmConfigs" :key="c.id" :label="c.name" :value="c.id"/></el-select>
+                <el-select v-model="selectedKBIds" multiple collapse-tags collapse-tags-tooltip placeholder="参考知识库" size="small" style="width:150px" clearable><el-option v-for="kb in kbStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id"/></el-select>
               </div>
             </div>
             <div v-if="generatedPrompt" class="bg-white rounded-xl border border-gray-200 p-5 space-y-3">

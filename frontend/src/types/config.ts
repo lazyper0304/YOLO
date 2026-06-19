@@ -80,3 +80,25 @@ export interface EmbeddingTestResult {
   message: string
   response_time_ms: number
 }
+
+/** OCR configuration. */
+export interface OCRConfig {
+  id: number
+  name: string
+  provider: string
+  api_base_url: string | null
+  language: string
+  is_active: boolean
+  description: string | null
+  created_at: string | null
+}
+
+/** OCR config create/update form. */
+export interface OCRConfigForm {
+  name: string
+  provider?: string
+  api_base_url?: string
+  api_key?: string
+  language?: string
+  description?: string
+}

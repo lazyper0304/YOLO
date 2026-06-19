@@ -60,8 +60,7 @@ def _parse_pdf(path: str) -> str:
         if text.strip():
             total_text_len += len(text)
             pages.append(f"--- 第 {i + 1} 页 ---\n{text}")
-        else:
-            pages.append(f"--- 第 {i + 1} 页 ---\n(空白页)")
+        # Skip blank pages silently — OCR will handle scanned PDFs later
 
     doc.close()
 

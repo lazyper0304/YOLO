@@ -1,23 +1,29 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { LLMConfig, LLMConfigForm, LLMTestResult, YOLOModelInfo, EmbeddingConfig, EmbeddingConfigForm, EmbeddingTestResult } from '@/types/config'
+import type { LLMConfig, LLMConfigForm, LLMTestResult, YOLOModelInfo, EmbeddingConfig, EmbeddingConfigForm, EmbeddingTestResult, OCRConfig, OCRConfigForm } from '@/types/config'
 import { llmConfigApi } from '@/api/llm_config'
 import { yoloModelsApi } from '@/api/yolo_models'
 import { embeddingConfigApi } from '@/api/embedding_config'
+import { ocrConfigApi } from '@/api/ocr_config'
 
 export const useConfigStore = defineStore('config', () => {
   const llmConfigs = ref<LLMConfig[]>([])
   const yoloModels = ref<YOLOModelInfo[]>([])
   const embeddingConfigs = ref<EmbeddingConfig[]>([])
+  const ocrConfigs = ref<OCRConfig[]>([])
   const isLoadingLLM = ref(false)
   const isLoadingYOLO = ref(false)
   const isLoadingEmbedding = ref(false)
+  const isLoadingOCR = ref(false)
 
   const activeLLMConfig = computed(() =>
     llmConfigs.value.find((c) => c.is_active) || null
   )
   const activeEmbeddingConfig = computed(() =>
     embeddingConfigs.value.find((c) => c.is_active) || null
+  )
+  const activeOCRConfig = computed(() =>
+    ocrConfigs.value.find((c) => c.is_active) || null
   )
   const customModels = computed(() =>
     yoloModels.value.filter((m) => !m.is_builtin)
@@ -120,15 +126,46 @@ export const useConfigStore = defineStore('config', () => {
     await updateEmbeddingConfig(id, { is_active: true })
   }
 
+  // OCR Config functions
+  async function fetchOCRConfigs() {
+    isLoadingOCR.value = true
+    try {
+      const res = await ocrConfigApi.list()
+      ocrConfigs.value = res.data.data as OCRConfig[]
+    } finally {
+      isLoadingOCR.value = false
+    }
+  }
+
+  async function createOCRConfig(form: OCRConfigForm) {
+    const res = await ocrConfigApi.create(form)
+    await fetchOCRConfigs()
+    return res.data.data
+  }
+
+  async function updateOCRConfig(id: number, form: Partial<OCRConfigForm & { is_active: boolean }>) {
+    const res = await ocrConfigApi.update(id, form)
+    await fetchOCRConfigs()
+    return res.data.data
+  }
+
+  async function deleteOCRConfig(id: number) {
+    await ocrConfigApi.delete(id)
+    await fetchOCRConfigs()
+  }
+
   return {
     llmConfigs,
     yoloModels,
     embeddingConfigs,
+    ocrConfigs,
     isLoadingLLM,
     isLoadingYOLO,
     isLoadingEmbedding,
+    isLoadingOCR,
     activeLLMConfig,
     activeEmbeddingConfig,
+    activeOCRConfig,
     customModels,
     builtinModels,
     fetchLLMConfigs,
@@ -146,5 +183,9 @@ export const useConfigStore = defineStore('config', () => {
     deleteEmbeddingConfig,
     testEmbeddingConfig,
     setActiveEmbeddingConfig,
+    fetchOCRConfigs,
+    createOCRConfig,
+    updateOCRConfig,
+    deleteOCRConfig,
   }
 })

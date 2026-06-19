@@ -197,12 +197,15 @@ export const useKnowledgeBaseStore = defineStore('knowledge_base', () => {
         if (!hasProcessing && documents.value.length > 0) {
           docProgress.value = {}
           stopPolling()
+          // Refresh KB list to update sidebar counts
+          fetchKnowledgeBases()
         } else if (hasProcessing) {
           // Keep polling but slower if only failed docs remain
           const onlyFailed = documents.value.every(d => d.status !== 'pending' && d.status !== 'processing')
           if (onlyFailed) {
             stopPolling()
             docProgress.value = {}
+            fetchKnowledgeBases()
           }
         }
       } catch {

@@ -80,16 +80,36 @@ async def list_knowledge_bases(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all knowledge bases for the current user."""
+    """List all knowledge bases for the current user, with real counts."""
     result = await db.execute(
         select(KnowledgeBase)
         .where(KnowledgeBase.user_id == user.id)
         .order_by(KnowledgeBase.created_at.desc())
     )
     kbs = result.scalars().all()
-    return success_response(
-        data=[KnowledgeBaseResponse.from_model(kb) for kb in kbs]
-    )
+
+    # Return real document and chunk counts from DB
+    from sqlalchemy import func
+    from app.models.knowledge_base import KBDocument
+    response_data = []
+    for kb in kbs:
+        doc_count_result = await db.execute(
+            select(func.count(KBDocument.id)).where(KBDocument.knowledge_base_id == kb.id)
+        )
+        real_doc_count = doc_count_result.scalar() or 0
+
+        chunk_sum_result = await db.execute(
+            select(func.coalesce(func.sum(KBDocument.chunk_count), 0))
+            .where(KBDocument.knowledge_base_id == kb.id)
+        )
+        real_chunk_count = chunk_sum_result.scalar() or 0
+
+        kb_data = KnowledgeBaseResponse.from_model(kb).model_dump()
+        kb_data["document_count"] = real_doc_count
+        kb_data["chunk_count"] = real_chunk_count
+        response_data.append(kb_data)
+
+    return success_response(data=response_data)
 
 
 # ─── Search and Q&A (MUST be before /{kb_id} routes) ──────────────
@@ -539,6 +559,20 @@ async def reprocess_document(
     except Exception as e:
         logger.error(f"Document reprocessing failed for doc {doc_id}: {e}", exc_info=True)
     return success_response(message="文档已重新处理")
+
+
+# ─── Sync KB counts ─────────────────────────────────────────────────
+
+@router.post("/{kb_id}/sync-counts")
+async def sync_kb_counts(
+    kb_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recalculate and sync knowledge base document/chunk counts from actual data."""
+    doc_service = DocumentService(db)
+    await doc_service.sync_kb_counts(kb_id)
+    return success_response(message="计数已同步")
 
 
 # ─── Reindex ────────────────────────────────────────────────────────
