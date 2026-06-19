@@ -30,7 +30,9 @@ Thumbs.db
 uploads/
 temp/
 models/
+!backend/app/models/
 *.pt
+!backend/app/models/*.pt
 
 # Redis
 *.rdb
