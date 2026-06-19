@@ -48,13 +48,20 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. 启动 MySQL
+### 3. 初始化数据库
 
-确保 MySQL 服务已运行，并创建数据库：
+确保 MySQL 服务已运行，然后导入数据库结构：
 
-```sql
-CREATE DATABASE IF NOT EXISTS yolo_detection CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```powershell
+# 方法一：使用初始化脚本（推荐首次安装）
+mysql -u root -p < sql\init_database.sql
+
+# 方法二：仅创建空数据库（然后由后端自动建表）
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS yolo_detection CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
+
+> 数据库初始化脚本 `sql/init_database.sql` 包含完整的表结构、外键约束和索引，
+> 与当前代码版本完全一致。后端启动后通过 Alembic 管理增量迁移。
 
 ### 4. 启动 Redis
 
@@ -82,8 +89,16 @@ SECRET_KEY=随机生成32位以上字符串
 ```powershell
 cd backend
 pip install -r requirements.txt
-alembic upgrade head
+
+# 如果已通过 init_database.sql 初始化数据库，则只需 stamp 当前版本
+alembic stamp head
+
+# 如果使用空数据库，则自动创建所有表
+# alembic upgrade head
 ```
+
+> **首次安装**：建议使用 `sql/init_database.sql` 导入完整结构，然后执行
+> `alembic stamp head` 记录迁移版本。后续代码升级时使用 `alembic upgrade head` 应用增量迁移。
 
 ### 7. 安装前端依赖
 
@@ -195,6 +210,8 @@ end/
 │           ├── HistoryView.vue        # 历史记录
 │           ├── DashboardView.vue      # 数据看板
 │           └── ModelsView.vue         # 模型管理
+├── sql/
+│   └── init_database.sql     # 数据库初始化脚本（建表 + 外键 + 索引）
 ├── docs/
 │   ├── PRD.md                # 产品需求文档
 │   └── ARCHITECTURE.md       # 系统架构设计
