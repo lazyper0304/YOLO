@@ -141,8 +141,14 @@ class RetrievalService:
         self,
         query: str,
         context: str,
+        history_messages: list[dict] | None = None,
     ) -> list[dict]:
-        """Build messages for LLM with RAG context injected."""
+        """Build messages for LLM with RAG context injected.
+
+        If history_messages are provided (from Redis), they are inserted
+        between the system message and the current question to maintain
+        multi-turn conversation context.
+        """
         system_msg = (
             "你是一个专业的知识库智能助手。请根据提供的参考资料回答用户问题。"
             "如果参考资料不足以回答问题，请如实说明，不要编造信息。"
@@ -153,10 +159,17 @@ class RetrievalService:
 
         user_msg = f"参考资料:\n\n{context}\n\n用户问题: {query}"
 
-        return [
+        result = [
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
         ]
+
+        # Insert conversation history for context (limit to last 10 turns)
+        if history_messages:
+            recent = history_messages[-20:]  # last 20 messages = ~10 turns
+            result.extend(recent)
+
+        result.append({"role": "user", "content": user_msg})
+        return result
 
     def _extract_highlights(
         self,

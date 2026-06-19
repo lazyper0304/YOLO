@@ -59,7 +59,7 @@ function send() { if (activeMode.value==='qa') sendQA(); else if (activeMode.val
 
 function sendQA() { if (!canSend.value) return; const q=question.value.trim(); question.value=''; messages.value.push({role:'user',content:q}); saveQAHistory(); streaming.value=true; currentStream.value=''; reasoningStream.value=''; reasoningExpanded.value=false; const p=new URLSearchParams({ question:q, token:token() }); if (selectedTaskId.value) p.set('task_id',String(selectedTaskId.value)); if (selectedLLMId.value) p.set('llm_config_id',String(selectedLLMId.value)); if (selectedKBIds.value.length) p.set('kb_ids', selectedKBIds.value.join(',')); doStream('/api/chat/stream?'+p.toString()) }
 
-function sendRag() { if (!canSend.value) return; const q=question.value.trim(); question.value=''; messages.value.push({role:'user',content:q}); streaming.value=true; currentStream.value=''; reasoningStream.value=''; reasoningExpanded.value=false; const p=new URLSearchParams({ question:q, token:token(), kb_ids:selectedKBIds.value.join(',') }); if (selectedLLMId.value) p.set('llm_config_id',String(selectedLLMId.value)); doStream('/api/rag-chat/stream?'+p.toString()) }
+function sendRag() { if (!canSend.value) return; const q=question.value.trim(); question.value=''; messages.value.push({role:'user',content:q}); streaming.value=true; currentStream.value=''; reasoningStream.value=''; reasoningExpanded.value=false; const p=new URLSearchParams({ question:q, token:token(), kb_ids:selectedKBIds.value.join(',') }); if (selectedLLMId.value) p.set('llm_config_id',String(selectedLLMId.value)); if (activeSessionId.value) p.set('session_id',activeSessionId.value); doStream('/api/rag-chat/stream?'+p.toString()) }
 
 function doStream(url: string) {
   const es = new EventSource(url)

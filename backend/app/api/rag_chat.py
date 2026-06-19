@@ -49,6 +49,7 @@ async def rag_chat_stream(
     token: str = "",
     kb_ids: str = "",
     llm_config_id: int | None = None,
+    session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Stream RAG chat response via SSE.
@@ -58,6 +59,7 @@ async def rag_chat_stream(
         token: JWT access token
         kb_ids: comma-separated knowledge base IDs
         llm_config_id: optional LLM config ID (uses active config if omitted)
+        session_id: optional session ID to include conversation history from Redis
     """
     user_id = _verify_token(token)
 
@@ -93,8 +95,23 @@ async def rag_chat_stream(
 
     context = retrieval.build_context(search_results)
 
-    # Build RAG prompt
-    messages = retrieval.build_rag_prompt(question, context)
+    # Build RAG prompt with conversation history if session_id provided
+    history_messages: list[dict] = []
+    if session_id:
+        first_kb_id = parsed_kb_ids[0]
+        history_key = _rag_history_key(first_kb_id, session_id)
+        try:
+            redis = get_redis()
+            raw_msgs = await redis.lrange(history_key, 0, -1)
+            for raw in raw_msgs:
+                try:
+                    history_messages.append(json.loads(raw))
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass  # Redis unavailable — proceed without history
+
+    messages = retrieval.build_rag_prompt(question, context, history_messages)
 
     # Get LLM config
     if llm_config_id:
