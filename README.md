@@ -16,7 +16,7 @@
 
 | 依赖 | 最低版本 | 说明 |
 |---|---|---|
-| Python | 3.13+ | 推荐使用项目自带 `.venv` |
+| Python | 3.13+ | 后端运行环境 |
 | Node.js | 18+ | 前端构建 |
 | MySQL | 8.0 | 持久化存储 |
 | Redis | 5.0+ | 缓存 / 进度追踪 |
@@ -25,7 +25,30 @@
 
 ## 快速启动
 
-### 1. 启动 MySQL
+### 1. 克隆仓库
+
+```powershell
+git clone https://github.com/lazyper0304/YOLO.git
+cd YOLO/end
+```
+
+### 2. 创建并激活虚拟环境
+
+```powershell
+# 创建虚拟环境
+python -m venv .venv
+
+# 激活（Windows PowerShell）
+.venv\Scripts\Activate.ps1
+
+# 激活（Windows CMD）
+.venv\Scripts\activate.bat
+
+# 激活（Linux / macOS）
+source .venv/bin/activate
+```
+
+### 3. 启动 MySQL
 
 确保 MySQL 服务已运行，并创建数据库：
 
@@ -33,14 +56,14 @@
 CREATE DATABASE IF NOT EXISTS yolo_detection CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 2. 启动 Redis
+### 4. 启动 Redis
 
 ```powershell
 cd Redis-8.8.0-Windows-x64-cygwin-with-Service
 .\redis-server.exe
 ```
 
-### 3. 配置后端
+### 5. 配置后端
 
 ```powershell
 cd backend
@@ -54,16 +77,22 @@ MYSQL_PASSWORD=你的MySQL密码
 SECRET_KEY=随机生成32位以上字符串
 ```
 
-### 4. 安装依赖
+### 6. 安装后端依赖并初始化数据库
 
 ```powershell
 cd backend
-..\.venv\Scripts\activate
 pip install -r requirements.txt
 alembic upgrade head
 ```
 
-### 5. 启动服务
+### 7. 安装前端依赖
+
+```powershell
+cd frontend
+npm install
+```
+
+### 8. 启动服务
 
 ```powershell
 # 终端1 — 后端
@@ -72,7 +101,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 终端2 — 前端
 cd frontend
-npm install
 npm run dev
 ```
 
