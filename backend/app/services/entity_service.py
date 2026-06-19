@@ -15,14 +15,29 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_keywords(text: str, top_n: int = 30) -> list[tuple[str, float]]:
-    """Extract keywords using jieba TF-IDF + TextRank.
+    """Extract keywords using jieba TF-IDF + TextRank with aggressive filtering.
 
     Returns list of (keyword, weight) tuples sorted by relevance.
+    Filters out stopwords, single characters, pure numbers/punctuation.
     """
     import jieba.analyse
 
-    tfidf = jieba.analyse.extract_tags(text, topK=top_n * 2, withWeight=True)
-    textrank = jieba.analyse.textrank(text, topK=top_n * 2, withWeight=True)
+    # Comprehensive Chinese stopwords — functional/grammatical particles and
+    # generic words that never make meaningful entities.
+    _STOPWORDS = {
+        '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
+        '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
+        '自己', '这', '他', '她', '它', '们', '那', '什么', '怎么', '为', '能', '对',
+        '等', '中', '与', '及', '或', '但', '而', '且', '被', '把', '让', '给', '向',
+        '从', '以', '于', '之', '所', '比', '而', '但', '将', '并', '其', '中', '更',
+        '已', '还', '又', '再', '才', '刚', '便', '则', '虽', '因', '若', '如', '使',
+        '第', '每', '各', '某', '该', '此', '其', '何', '哪', '谁', '怎', '几', '多',
+        '少', '大', '小', '长', '高', '低', '远', '近', '快', '慢', '新', '旧', '好',
+        '坏', '真', '假', '正', '反', '对', '错',
+    }
+
+    tfidf = jieba.analyse.extract_tags(text, topK=top_n * 3, withWeight=True)
+    textrank = jieba.analyse.textrank(text, topK=top_n * 3, withWeight=True)
 
     merged: dict[str, float] = {}
     for kw, w in tfidf:
@@ -30,10 +45,34 @@ def _extract_keywords(text: str, top_n: int = 30) -> list[tuple[str, float]]:
     for kw, w in textrank:
         merged[kw] = merged.get(kw, 0) + w
 
-    filtered = [(k, v) for k, v in merged.items()
-                if len(k) >= 2 and not k.isdigit() and not all(c in '0123456789.-+%' for c in k)]
+    filtered = []
+    for kw, score in merged.items():
+        kw = kw.strip()
+        # Reject: stopwords, single chars, pure digits, pure punctuation
+        if kw in _STOPWORDS:
+            continue
+        if len(kw) <= 1:
+            continue
+        if kw.isdigit():
+            continue
+        if all(c in '0123456789.-+%／、，。！？；：""''（）【】《》· ' for c in kw):
+            continue
+        # Reject: only numbers + common units/suffixes (e.g. "10个", "第1")
+        if len(kw) <= 2 and any(c.isdigit() for c in kw):
+            continue
+        filtered.append((kw, score))
 
     filtered.sort(key=lambda x: x[1], reverse=True)
+
+    # Keep top N, then apply a minimum weight threshold (at least 10% of max)
+    # to eliminate low-quality fringe keywords
+    top = filtered[:max(top_n * 2, 20)]
+    if top:
+        max_weight = top[0][1]
+        filtered = [(k, v) for k, v in top if v >= max_weight * 0.15]
+    else:
+        filtered = []
+
     return filtered[:top_n]
 
 
@@ -109,15 +148,15 @@ async def extract_entities_for_kb(kb_id: int) -> dict:
         if not chunks:
             return {"entities_added": 0, "relations_added": 0}
 
-        # Extract per-chunk keywords
+        # Extract per-chunk keywords (fewer but higher quality)
         per_chunk_kw: list[set[str]] = []
         for c in chunks:
-            kws = _extract_keywords(c, top_n=8)
+            kws = _extract_keywords(c, top_n=6)
             per_chunk_kw.append({kw for kw, _ in kws})
 
         # Global keywords from combined text
         combined = "\n".join(chunks)
-        global_kws = _extract_keywords(combined, top_n=25)
+        global_kws = _extract_keywords(combined, top_n=20)
 
         # Cluster similar keywords
         embedder = EmbeddingService()

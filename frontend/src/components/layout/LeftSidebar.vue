@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
 import { Monitor, Setting, View, ChatDotRound, Collection } from '@element-plus/icons-vue'
+import appVersion from '@/version'
 
 const router = useRouter()
 const route = useRoute()
@@ -38,5 +39,10 @@ function isActive(path: string) {
         <span>{{ item.label }}</span>
       </div>
     </nav>
+
+    <!-- Version -->
+    <div class="px-3 py-1.5 border-t border-gray-100 text-center">
+      <span class="text-[10px] text-gray-300">v{{ appVersion }}</span>
+    </div>
   </aside>
 </template>

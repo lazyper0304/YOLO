@@ -28,3 +28,7 @@
 - **前端模块化**：`KBSidebar`、`KBDocumentTable`、`DocumentPreviewDialog` 独立组件
 - **桶导出完善**：`config/index.ts` 补上 `EmbeddingConfigDialog`；`components/index.ts` 添加 knowledge 路径
 - **提示词优化**：QA 和 RAG 模式均要求 LLM 使用 Markdown 格式回答
+
+### 🎯 优化
+- **知识库关键词提取优化**：增加停用词过滤、单字/纯数字过滤、权重阈值筛选，只保留有实际意义的实体
+- **版本号自动跟踪**：`VERSION` 文件 + 侧边栏显示，每次变更递增
