@@ -105,6 +105,13 @@ async def upload_model(
         traceback.print_exc()
         print(f"Warning: Failed to load classes from uploaded model: {e}")
 
+    # Validate model can actually be loaded
+    try:
+        test_model = await loop.run_in_executor(None, lambda: YOLO(saved_path))
+        del test_model
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"模型加载失败，ultralytics 版本可能不兼容: {str(e)[:200]}")
+
     model = YOLOModel(
         user_id=current_user.id,
         name=name,

@@ -37,3 +37,30 @@ class ImageDetectionQuery(BaseModel):
     mode: str = Field(default="yolo_only", pattern=r"^(yolo_only|llm_only|collaborative)$")
     model_id: int | None = None
     llm_config_id: int | None = None
+
+
+class FrameAnalysisResult(BaseModel):
+    """Single frame analysis result in video/camera tasks."""
+    frame_index: int
+    time_seconds: float
+    bboxes: list[BBoxItem] = []
+    llm_analysis: LLMAnalysisResult | None = None
+    thumbnail_path: str | None = None
+
+
+class VideoAnalysisOptions(BaseModel):
+    """Options for video/camera LLM frame analysis."""
+    frame_interval_seconds: int = Field(default=5, ge=1, le=300)
+    analysis_prompt: str | None = None  # 全视频主题分析提示词
+
+
+class GeneratePromptRequest(BaseModel):
+    """Request for LLM to generate an analysis prompt."""
+    requirement: str  # 用户自然语言描述的分析需求
+    llm_config_id: int | None = None
+
+
+class AnalyzeFrameRequest(BaseModel):
+    """Request for analyzing a single camera frame."""
+    frame_index: int
+    time_seconds: float

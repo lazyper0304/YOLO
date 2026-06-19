@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useConfigStore } from '@/stores/config'
-import type { LLMProvider, LLMConfigForm } from '@/types/config'
+import type { LLMProvider, LLMConfigForm, LLMConfig } from '@/types/config'
 
 const props = defineProps<{
   visible: boolean
+  editConfig?: LLMConfig | null
 }>()
 
 const emit = defineEmits<{
@@ -13,6 +14,9 @@ const emit = defineEmits<{
 }>()
 
 const configStore = useConfigStore()
+
+const isEditMode = computed(() => !!props.editConfig)
+const dialogTitle = computed(() => isEditMode.value ? '编辑 LLM 配置' : '添加 LLM 配置')
 
 const formRef = ref()
 const loading = ref(false)
@@ -43,14 +47,25 @@ const providers: { value: LLMProvider; label: string }[] = [
 
 watch(() => props.visible, (val) => {
   if (val) {
-    Object.assign(form, {
-      name: '',
-      api_base_url: '',
-      api_key: '',
-      model_name: '',
-      provider: 'generic' as LLMProvider,
-      is_active: false,
-    })
+    if (props.editConfig) {
+      Object.assign(form, {
+        name: props.editConfig.name || '',
+        api_base_url: props.editConfig.api_base_url || '',
+        api_key: '',
+        model_name: props.editConfig.model_name || '',
+        provider: (props.editConfig.provider as LLMProvider) || 'generic',
+        is_active: props.editConfig.is_active || false,
+      })
+    } else {
+      Object.assign(form, {
+        name: '',
+        api_base_url: '',
+        api_key: '',
+        model_name: '',
+        provider: 'generic' as LLMProvider,
+        is_active: false,
+      })
+    }
     testing.value = false
   }
 })
@@ -61,8 +76,17 @@ async function handleSave() {
 
   loading.value = true
   try {
-    await configStore.createLLMConfig({ ...form })
-    ElMessage.success('LLM配置创建成功')
+    const payload: Partial<LLMConfigForm> = { ...form }
+    if (!payload.api_key) delete payload.api_key
+    if (payload.api_key) payload.api_key = payload.api_key
+
+    if (isEditMode.value && props.editConfig) {
+      await configStore.updateLLMConfig(props.editConfig.id, payload)
+      ElMessage.success('LLM配置已更新')
+    } else {
+      await configStore.createLLMConfig(payload as LLMConfigForm)
+      ElMessage.success('LLM配置创建成功')
+    }
     emit('update:visible', false)
   } catch {
     // Error handled by interceptor
@@ -77,14 +101,15 @@ async function handleTest() {
 
   testing.value = true
   try {
-    // Create config first, then test
     const result = await configStore.createLLMConfig({ ...form })
     const testResult = await configStore.testLLMConfig(result.id)
     if (testResult.success) {
       ElMessage.success(`连接成功！响应时间: ${testResult.response_time_ms.toFixed(0)}ms`)
     } else {
       ElMessage.error(`连接失败: ${testResult.message}`)
-      // Remove the failed config
+    }
+    // Clean up test config if not in edit mode
+    if (!isEditMode.value) {
       await configStore.deleteLLMConfig(result.id)
     }
   } catch {
@@ -98,7 +123,7 @@ async function handleTest() {
 <template>
   <el-dialog
     :model-value="visible"
-    title="添加 LLM 配置"
+    :title="dialogTitle"
     width="520px"
     :close-on-click-modal="false"
     @update:model-value="(val: boolean) => emit('update:visible', val)"
@@ -146,7 +171,7 @@ async function handleTest() {
         <el-button :loading="testing" @click="handleTest">测试连接</el-button>
         <div class="flex gap-2">
           <el-button @click="emit('update:visible', false)">取消</el-button>
-          <el-button type="primary" :loading="loading" @click="handleSave">保存</el-button>
+          <el-button type="primary" :loading="loading" @click="handleSave">{{ isEditMode ? '保存' : '添加' }}</el-button>
         </div>
       </div>
     </template>

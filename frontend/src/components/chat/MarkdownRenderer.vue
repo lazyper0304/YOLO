@@ -33,16 +33,31 @@ const rendered = computed(() => {
 </script>
 
 <template>
-  <div
-    class="markdown-body text-sm leading-relaxed"
-    :class="{ 'streaming-cursor': isStreaming && !content }"
-    v-html="rendered"
-  />
+  <div class="markdown-body text-sm leading-relaxed relative">
+    <div v-html="rendered" />
+    <span v-if="isStreaming && content" class="streaming-cursor" />
+  </div>
 </template>
 
 <style scoped>
 /* Import highlight.js dark theme for code blocks */
 @import 'highlight.js/styles/atom-one-dark.css';
+
+/* Streaming cursor */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: #3b82f6;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
 
 /* Base markdown styles */
 .markdown-body :deep(p) { margin: 0.5em 0; }

@@ -23,6 +23,7 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".webm"}
 ALLOWED_MODEL_EXTENSIONS = {".pt"}
+ALLOWED_DOC_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 
 
 def validate_file_magic(content: bytes, expected_type: str) -> bool:
@@ -66,12 +67,13 @@ async def save_upload_file(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    return str(file_path)
+    # Return path with forward slashes for cross-platform compatibility
+    return str(file_path).replace("\\", "/")
 
 
 def create_upload_directories() -> None:
     """Create all required upload subdirectories on startup."""
-    categories = ["images", "videos", "models", "thumbnails", "temp"]
+    categories = ["images", "videos", "models", "thumbnails", "temp", "documents"]
     upload_dir = Path(settings.UPLOAD_DIR)
     for category in categories:
         (upload_dir / category).mkdir(parents=True, exist_ok=True)

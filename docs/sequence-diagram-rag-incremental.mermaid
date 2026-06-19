@@ -1,0 +1,108 @@
+sequenceDiagram
+    title 图片解析流程 (P0-2)
+    actor User
+    participant KBView as KnowledgeBaseView
+    participant KBStore as knowledge_base store
+    participant KBAPI as knowledge_base API
+    participant DocSvc as DocumentService
+    participant ImgParser as ImageParser
+    participant LLMSvc as LLMService
+    participant EmbedSvc as EmbeddingService
+    participant Chroma as ChromaService
+    participant MySQL
+
+    User->>KBView: 上传图片文件 (.jpg/.png)
+    KBView->>KBStore: uploadDocument(kbId, file)
+    KBStore->>KBAPI: POST /{kb_id}/documents (multipart)
+    KBAPI->>DocSvc: upload_document(user_id, kb_id, content, filename)
+    DocSvc->>MySQL: INSERT KBDocument (status=pending)
+    DocSvc-->>KBAPI: doc (id=123)
+    KBAPI-->>KBStore: doc response
+    KBStore-->>KBView: 文档已上传
+    KBView->>KBView: 启动 3s 轮询
+
+    Note over DocSvc: 后台异步处理
+    DocSvc->>MySQL: UPDATE status=processing
+    DocSvc->>ImgParser: parse(file_path, llm_service, llm_config)
+    ImgParser->>ImgParser: 读取文件 → base64 编码
+    ImgParser->>LLMSvc: analyze_image(base64, prompt)
+    LLMSvc-->>ImgParser: {summary, detailed_analysis}
+    ImgParser-->>DocSvc: 文本描述字符串
+    DocSvc->>DocSvc: split_text(description) → chunks
+    DocSvc->>EmbedSvc: embed_texts(chunk_texts)
+    EmbedSvc-->>DocSvc: embeddings[][]
+    DocSvc->>MySQL: INSERT KBChunk × N
+    DocSvc->>Chroma: add_chunks(kb_id, ids, texts, embeddings, metadatas)
+    DocSvc->>MySQL: UPDATE status=completed, chunk_count=N
+    Note over KBView: 3s 轮询检测到 status=completed → 停止轮询
+
+---
+    title 重索引流程 (P1-4)
+    actor User2 as User
+    participant KBView2 as KnowledgeBaseView
+    participant KBAPI2 as knowledge_base API
+    participant DocSvc2 as DocumentService
+    participant EmbedSvc2 as EmbeddingService
+    participant Chroma2 as ChromaService
+    participant Redis2 as Redis
+    participant MySQL2 as MySQL
+
+    User2->>KBView2: 切换嵌入模型 → 点击「重索引」
+    KBView2->>KBAPI2: POST /{kb_id}/reindex
+    KBAPI2->>Redis2: SET reindex:progress:{kb_id} {status:"running", total:N, done:0}
+    KBAPI2-->>KBView2: {accepted: true}
+
+    loop 轮询进度 (每 2s)
+        KBView2->>KBAPI2: GET /{kb_id}/reindex/status
+        KBAPI2->>Redis2: GET reindex:progress:{kb_id}
+        KBAPI2-->>KBView2: {status, done, total, progress_pct}
+    end
+
+    Note over DocSvc2: 后台异步执行
+    DocSvc2->>MySQL2: SELECT KBDocument WHERE kb_id={kb_id}
+    loop 遍历每个文档
+        DocSvc2->>Redis2: GET reindex:cancel:{kb_id}
+        alt 已取消
+            DocSvc2->>Redis2: SET progress {status:"cancelled"}
+            Note over DocSvc2: 退出循环
+        end
+        DocSvc2->>MySQL2: SELECT KBChunk WHERE document_id={doc_id}
+        DocSvc2->>EmbedSvc2: embed_texts(chunk_texts) ← 使用新模型
+        EmbedSvc2-->>DocSvc2: new_embeddings[][]
+        DocSvc2->>Chroma2: update_chunk_embedding(kb_id, chroma_ids, new_embeddings)
+        DocSvc2->>Redis2: HINCRBY progress done 1
+    end
+    DocSvc2->>MySQL2: UPDATE KnowledgeBase embedding_model={new_model}
+    DocSvc2->>Redis2: SET progress {status:"completed"}
+    KBView2->>KBView2: 刷新知识库信息
+
+---
+    title RAG 对话持久化流程 (P1-1)
+    actor User3 as User
+    participant RAGView as RAGChatView
+    participant KBAPI3 as knowledge_base API
+    participant Redis3 as Redis
+
+    User3->>RAGView: 进入 RAG 问答页面
+    RAGView->>KBAPI3: GET /chat/sessions
+    KBAPI3->>Redis3: SMEMBERS rag:chat:sessions:{user_id}
+    Redis3-->>KBAPI3: [session_ids]
+    KBAPI3->>Redis3: HGETALL rag:chat:session:meta:{user_id}:{sid} × N
+    Redis3-->>KBAPI3: [{title, created_at}]
+    KBAPI3-->>RAGView: sessions list
+
+    User3->>RAGView: 选择/新建会话
+    RAGView->>KBAPI3: GET /chat/history?session_id={sid}
+    KBAPI3->>Redis3: LRANGE rag:chat:history:{user_id}:{sid} 0 -1
+    Redis3-->>KBAPI3: [JSON messages]
+    KBAPI3-->>RAGView: {messages: [...]}
+    RAGView->>RAGView: 渲染历史消息
+
+    User3->>RAGView: 发送新问题
+    RAGView->>RAGView: SSE 流式接收回答
+    RAGView->>KBAPI3: POST /chat/history {session_id, messages: [...]}
+    KBAPI3->>Redis3: DEL + RPUSH rag:chat:history:{user_id}:{sid}
+    KBAPI3->>Redis3: EXPIRE 86400
+    KBAPI3->>Redis3: SADD rag:chat:sessions:{user_id} {sid}
+    KBAPI3->>Redis3: HSET rag:chat:session:meta:{user_id}:{sid}
+    KBAPI3-->>RAGView: ok

@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ChatView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/knowledge-base',
+    name: 'KnowledgeBase',
+    component: () => import('@/views/KnowledgeBaseView.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

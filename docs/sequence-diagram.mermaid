@@ -1,63 +1,121 @@
 sequenceDiagram
-    actor U as 用户
-    participant F as Vue 前端
-    participant API as FastAPI Router
+    actor User
+    participant API as DetectionRouter
+    participant Resp as ResponseHelpers
+    participant Auth as get_current_user
     participant DS as DetectionService
-    participant YS as YOLOService
-    participant LS as LLMService
-    participant IS as ImageService
-    participant DB as MySQL
-    participant R as Redis
+    participant DB as AsyncSession
+    participant YOLO as YOLOService
+    participant LLM as LLMService
+    participant Img as ImageService
+    participant TQ as TaskQueue
+    participant VP as VideoProcessor
 
-    U->>F: 选择图片 + 协同模式 + 模型
-    U->>F: 点击「开始检测」
-    F->>F: LoadingOverlay 显示
+    %% ── 图片检测流程 ──
+    rect rgb(240, 248, 255)
+        Note over User,Img: 图片检测（同步）
 
-    F->>API: POST /api/detection/image (multipart: file + mode + yolo_id + llm_id)
-    API->>API: 校验 JWT + 参数
+        User->>API: POST /api/detection/detect
+        API->>Auth: 验证 JWT Token
+        Auth-->>API: current_user
 
-    API->>IS: save_upload(file, user_id, "images")
-    IS-->>API: image_path
+        API->>DS: DetectionService(db)
+        DS->>DS: process_image_detection(user_id, image, mode, model_id, llm_config_id)
 
-    API->>DS: detect_image(db, user_id, image_path, "collaborative", yolo_id, llm_id)
-
-    Note over DS: 协同模式核心逻辑
-
-    DS->>YS: detect(model, image_path)
-    YS->>YS: 加载 YOLO 模型（从缓存或磁盘）
-    YS-->>DS: List~BBoxItem~ (detections)
-
-    alt 无检测结果
-        DS-->>API: 返回空结果 + 提示
-    else 有检测结果
-        loop 每个检测区域
-            DS->>IS: crop_region(image_path, bbox)
-            IS-->>DS: region_image_bytes
-
-            DS->>IS: encode_to_base64(region_image_bytes)
-            IS-->>DS: region_base64
-
-            DS->>LS: analyze_region(api_base_url, api_key, model_name, region_base64, context)
-            LS->>LS: 构造 OpenAI/Claude 兼容请求
-            LS-->>DS: region_description
+        alt mode == "yolo_only"
+            DS->>YOLO: detect(image_path, model_path)
+            YOLO-->>DS: bboxes[]
+        else mode == "llm_only"
+            DS->>Img: encode_image_base64(image_path)
+            Img-->>DS: base64_string
+            DS->>LLM: analyze_image(api_url, api_key, model, image_b64, prompt)
+            LLM-->>DS: llm_analysis
+        else mode == "collaborative"
+            DS->>YOLO: detect(image_path, model_path)
+            YOLO-->>DS: bboxes[]
+            DS->>Img: encode_image_base64(image_path)
+            Img-->>DS: base64_string
+            DS->>LLM: analyze_image(api_url, api_key, model, image_b64, prompt)
+            LLM-->>DS: llm_analysis
         end
 
-        DS->>IS: draw_bboxes(image_path, detections)
-        IS-->>DS: annotated_image_base64
+        DS->>Img: generate_thumbnail(content)
+        Img-->>DS: thumbnail_path
 
-        DS->>IS: create_thumbnail(image_path, 200)
-        IS-->>DS: thumbnail_path
+        DS->>DB: add(DetectionRecord)
+        DS->>DB: commit()
 
-        DS->>DB: INSERT DetectionRecord
-        DB-->>DS: record_id
+        DS-->>API: result dict
 
-        DS->>R: SETEX cache:detection:{record_id} 3600 result_json
-
-        DS-->>API: DetectionResponse
+        API->>Resp: success_response(data=result)
+        Resp-->>API: {"code":0, "message":"ok", "data":{...}}
+        API-->>User: 200 JSON Response
     end
 
-    API-->>F: APIResponse{code:0, data: DetectionResponse}
-    F->>F: ImageCanvas 渲染标注图
-    F->>F: BBoxList 展示检测列表
-    F->>F: LLMAnalysis 展示分析文字
-    F->>F: LoadingOverlay 隐藏
+    %% ── 任务队列流程 ──
+    rect rgb(255, 248, 240)
+        Note over User,VP: 视频检测（异步任务队列）
+
+        User->>API: POST /api/tasks (video upload)
+        API->>Auth: 验证 JWT Token
+        Auth-->>API: current_user
+
+        API->>DB: add(DetectionRecord, status="pending")
+        API->>DB: commit()
+        DB-->>API: record
+
+        API->>Resp: success_response(data={task_id, status:"pending"})
+        API-->>User: 200 JSON Response
+
+        Note over TQ: 后台 _process_loop 轮询
+
+        loop 每 1 秒轮询
+            TQ->>DB: SELECT ... WHERE status="pending" ... FOR UPDATE SKIP LOCKED
+            DB-->>TQ: record (or None)
+        end
+
+        TQ->>DB: UPDATE status="running"
+        TQ->>DB: commit()
+
+        TQ->>TQ: _dispatch(db, record)
+
+        alt source_type == "video" && mode in ("llm_only","collaborative")
+            TQ->>VP: process(record)
+            VP->>VP: 逐帧 YOLO 检测 + LLM 分析
+            loop 每处理一帧
+                VP->>DB: UPDATE progress
+                VP->>DB: commit()
+            end
+            VP-->>TQ: done
+        else source_type == "video"
+            TQ->>VP: process(record)
+            VP->>VP: 逐帧 YOLO 检测
+            VP-->>TQ: done
+        else source_type == "image"
+            TQ->>DS: process_image_detection(...)
+            DS-->>TQ: result
+        end
+
+        TQ->>DB: UPDATE status="completed", result_json=..., progress=100
+        TQ->>DB: commit()
+
+        User->>API: GET /api/tasks/{id}
+        API->>DB: SELECT DetectionRecord WHERE id=...
+        DB-->>API: record (status="completed")
+        API->>Resp: success_response(data=record)
+        API-->>User: 200 JSON Response
+    end
+
+    %% ── 异常处理流程 ──
+    rect rgb(255, 240, 240)
+        Note over User,API: 异常处理流程
+
+        User->>API: GET /api/models/999
+        API->>DB: SELECT YOLOModel WHERE id=999
+        DB-->>API: None
+
+        API->>API: raise NotFoundException("YOLO模型不存在")
+        Note over API: 全局异常处理器捕获
+
+        API-->>User: 404 {"code":404, "message":"YOLO模型不存在", "data":null}
+    end

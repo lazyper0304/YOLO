@@ -1,0 +1,146 @@
+classDiagram
+    class ImageParser {
+        +ALLOWED_TYPES: set[str]
+        +parse(file_path: str, llm_service: LLMService, llm_config: dict)$ async str
+        -_read_image_base64(file_path: str)$ str
+        -_build_analysis_prompt()$ str
+    }
+
+    class DocumentService {
+        -db: AsyncSession
+        -chroma: ChromaService
+        -embedder: EmbeddingService
+        +upload_document(user_id, kb_id, content, filename) async KBDocument
+        +process_document(doc_id) async None
+        +delete_document(doc_id, user_id) async None
+        +reprocess_document(doc_id, user_id) async None
+        +reindex_kb(kb_id) async None <<NEW>>
+        +batch_delete_documents(kb_id, doc_ids) async dict <<NEW>>
+        +export_kb(kb_id) async str <<NEW>>
+        +import_kb(zip_path, user_id) async dict <<NEW>>
+        +get_document_preview(doc_id) async dict <<NEW>>
+        -_do_process_document(doc_id) async None
+        -_do_reindex(kb_id) async None <<NEW>>
+    }
+
+    class ChromaService {
+        -_client: PersistentClient
+        +get_or_create_collection(kb_id) Collection
+        +add_chunks(kb_id, ids, documents, embeddings, metadatas)
+        +query(kb_id, embedding, top_k) list~dict~
+        +delete_chunks(kb_id, chunk_ids)
+        +delete_collection(kb_id)
+        +update_chunk_embedding(kb_id, chunk_ids, new_embeddings) <<NEW>>
+    }
+
+    class RetrievalService {
+        -chroma: ChromaService
+        -embedder: EmbeddingService
+        +search(kb_ids, query, top_k) async list~dict~
+        +build_context(chunks, max_tokens) str
+        +build_rag_prompt(query, context) list~dict~
+        -_extract_highlights(content, query) list~str~ <<NEW>>
+    }
+
+    class EmbeddingService {
+        -_redis: Redis
+        -_config_cache: dict
+        +embed_texts(texts) async list~list~float~~
+        +embed_query(query) async list~float~
+        -_get_config() async dict
+        -_get_cached_embedding(text, model) list~float~
+        -_set_cached_embedding(text, model, embedding)
+        -_call_api_embedding(texts, config) async list~list~float~~
+    }
+
+    class RAGSessionCreate {
+        +title: str | None
+    }
+
+    class RAGSessionResponse {
+        +session_id: str
+        +title: str
+        +message_count: int
+        +created_at: str
+        +updated_at: str
+    }
+
+    class RAGHistorySaveRequest {
+        +session_id: str
+        +messages: list~HistoryMessage~
+    }
+
+    class KBStatsResponse {
+        +kb_id: int
+        +total_documents: int
+        +total_chunks: int
+        +total_tokens: int
+        +avg_chunks_per_doc: float
+        +avg_tokens_per_chunk: float
+        +status_breakdown: dict
+        +file_type_breakdown: dict
+        +total_size_bytes: int
+        +last_updated: str
+    }
+
+    class ReindexStatusResponse {
+        +kb_id: int
+        +status: str
+        +total_documents: int
+        +processed_documents: int
+        +progress_pct: float
+        +current_document: str | None
+        +error_message: str | None
+        +started_at: str | None
+        +finished_at: str | None
+    }
+
+    class DocPreviewResponse {
+        +doc_id: int
+        +filename: str
+        +file_type: str
+        +file_size: int
+        +status: str
+        +content_preview: str
+        +chunks: list~dict~
+    }
+
+    class BatchDeleteRequest {
+        +doc_ids: list~int~
+    }
+
+    class BatchDeleteResponse {
+        +deleted_count: int
+        +failed_ids: list~int~
+    }
+
+    class ImportResultResponse {
+        +kb_id: int
+        +kb_name: str
+        +documents_imported: int
+        +status: str
+        +error_message: str | None
+    }
+
+    class RAGSearchResult {
+        +chunk_id: str
+        +content: str
+        +distance: float
+        +document_filename: str
+        +knowledge_base_id: int
+        +highlights: list~str~
+    }
+
+    class PaginatedDocResponse {
+        +items: list~KBDocumentResponse~
+        +total: int
+        +page: int
+        +page_size: int
+    }
+
+    DocumentService --> ChromaService : uses
+    DocumentService --> EmbeddingService : uses
+    DocumentService --> ImageParser : uses for images
+    RetrievalService --> ChromaService : uses
+    RetrievalService --> EmbeddingService : uses
+    ImageParser --> LLMService : calls analyze_image

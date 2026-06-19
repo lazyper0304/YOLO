@@ -1,225 +1,167 @@
 classDiagram
-    direction TB
-
-    %% ========== ORM Models ==========
-    class User {
-        +int id
-        +str username
-        +str email
-        +str password_hash
-        +datetime created_at
-        +datetime updated_at
-        +List~DetectionRecord~ records
-        +List~LLMConfig~ llm_configs
-        +List~YOLOModel~ yolo_models
-    }
-
-    class LLMConfig {
-        +int id
-        +int user_id
-        +str name
-        +str api_base_url
-        +str api_key
-        +str model_name
-        +str provider
-        +bool is_active
-        +datetime created_at
-        +datetime updated_at
-    }
-
-    class YOLOModel {
-        +int id
-        +int user_id
-        +str name
-        +str file_path
-        +str model_type
-        +bool is_builtin
-        +int file_size
-        +bool is_active
-        +datetime uploaded_at
-    }
-
-    class DetectionRecord {
-        +int id
-        +int user_id
-        +str source_type
-        +str source_path
-        +str mode
-        +int yolo_model_id
-        +int llm_config_id
-        +dict result_json
-        +str thumbnail_path
-        +datetime created_at
-    }
-
-    User "1" -- "many" DetectionRecord
-    User "1" -- "many" LLMConfig
-    User "1" -- "many" YOLOModel
-    DetectionRecord "many" -- "1" YOLOModel : yolo_model_id
-    DetectionRecord "many" -- "1" LLMConfig : llm_config_id
-
-    %% ========== Pydantic Schemas ==========
-    class RegisterRequest {
-        +str username
-        +str email
-        +str password
-    }
-
-    class LoginRequest {
-        +str username
-        +str password
-    }
-
-    class TokenResponse {
-        +str access_token
-        +str token_type
-        +UserResponse user
-    }
-
-    class UserResponse {
-        +int id
-        +str username
-        +str email
-    }
-
-    class LLMConfigCreate {
-        +str name
-        +str api_base_url
-        +str api_key
-        +str model_name
-        +str provider
-    }
-
-    class LLMConfigResponse {
-        +int id
-        +str name
-        +str api_base_url
-        +str model_name
-        +str provider
-        +bool is_active
-        +str created_at
-    }
-
-    class YOLOModelResponse {
-        +int id
-        +str name
-        +str model_type
-        +bool is_builtin
-        +int file_size
-        +bool is_active
-        +str uploaded_at
-    }
-
-    class DetectionRequest {
-        +str mode
-        +int yolo_model_id
-        +int llm_config_id
-        +int frame_interval
-    }
-
-    class BBoxItem {
-        +str class_name
-        +float confidence
-        +float x1
-        +float y1
-        +float x2
-        +float y2
-    }
-
-    class LLMAnalysisItem {
-        +int region_index
-        +str class_name
-        +float confidence
-        +str description
-    }
-
-    class DetectionResponse {
-        +int record_id
-        +str mode
-        +str source_type
-        +str annotated_image_base64
-        +List~BBoxItem~ detections
-        +List~LLMAnalysisItem~ llm_analysis
-        +datetime created_at
-    }
-
-    class HistoryQuery {
-        +int page
-        +int page_size
-        +str mode
-        +str source_type
-        +str date_from
-        +str date_to
-    }
-
-    class HistoryListResponse {
-        +int total
-        +int page
-        +List~HistoryItem~ items
-    }
-
-    class HistoryItem {
-        +int id
-        +str source_type
-        +str mode
-        +str thumbnail_base64
-        +datetime created_at
-    }
-
-    class APIResponse~T~ {
-        +int code
+    %% ── 异常层次 ──
+    class AppException {
         +str message
-        +T data
+        +int code
+        +int status_code
+    }
+    class NotFoundException {
+        +__init__(message, code=404)
+    }
+    class ValidationException {
+        +__init__(message, code=422)
+    }
+    class AuthException {
+        +__init__(message, code=401)
+    }
+    class BusinessException {
+        +__init__(message, code=1)
+    }
+    class ServiceUnavailableException {
+        +__init__(message, code=503)
+    }
+    AppException <|-- NotFoundException
+    AppException <|-- ValidationException
+    AppException <|-- AuthException
+    AppException <|-- BusinessException
+    AppException <|-- ServiceUnavailableException
+
+    %% ── 响应辅助 ──
+    class ResponseHelpers {
+        +success_response(data, message) dict
+        +paginated_response(items, total, page, page_size) dict
+        +error_response(code, message, data) dict
     }
 
-    %% ========== Service Classes ==========
+    %% ── Service 基类 ──
+    class BaseService {
+        +AsyncSession db
+        +__init__(db)
+    }
+
+    %% ── 业务 Service ──
     class AuthService {
-        +async register(db, RegisterRequest) User
-        +async authenticate(db, username, password) User
-        +create_access_token(user_id) str
-        +get_password_hash(password) str
-        +verify_password(plain, hashed) bool
+        +register(username, password) User
+        +authenticate(username, password) dict
+        +get_user(user_id) User
     }
-
-    class YOLOService {
-        -dict _model_cache
-        +async load_model(model_path, device) YOLO
-        +async detect(model, image_path) List~BBoxItem~
-        +async unload_model(model_id) void
-        +validate_model_file(file_path) bool
-    }
-
-    class LLMService {
-        -dict _adapter_registry
-        +register_adapter(provider, adapter) void
-        +async analyze_image(api_base_url, api_key, model_name, image_base64) str
-        +async analyze_region(api_base_url, api_key, model_name, region_image_base64, context) str
-        +async test_connection(api_base_url, api_key, model_name) bool
-    }
-
     class DetectionService {
-        +async detect_image(db, user_id, image_path, mode, yolo_model_id, llm_config_id) DetectionResponse
-        +async detect_video(db, user_id, video_path, mode, yolo_model_id, llm_config_id, frame_interval) List~DetectionResponse~
-        +async detect_camera_frame(db, user_id, frame_bytes, mode, ...) DetectionResponse
-        +async _yolo_only(image_path, yolo_model_id) dict
-        +async _llm_only(image_path, llm_config_id) dict
-        +async _collaborative(image_path, yolo_model_id, llm_config_id) dict
+        +YOLOService yolo_service
+        +LLMService llm_service
+        +ImageService image_service
+        +process_image_detection(...) dict
     }
-
+    class YOLOService {
+        +detect(image_path, model_path) list
+        +pre_download_models()
+    }
+    class LLMService {
+        +analyze_image(...) dict
+        +chat_completion(...) str
+    }
     class ImageService {
-        +async crop_region(image_path, bbox) bytes
-        +async draw_bboxes(image_path, detections) str
-        +async encode_to_base64(image_path_or_bytes) str
-        +async save_upload(file, user_id, category) str
-        +async create_thumbnail(image_path, size) str
+        +encode_image_base64(path) str
+        +generate_thumbnail(content) str
     }
-
     class VideoService {
-        +async extract_frames(video_path, frame_interval) List~str~
-        +async save_upload(file, user_id) str
+        +extract_frames(video_path, interval) list
+        +generate_annotated_video(...) str
+    }
+    class DashboardService {
+        +get_stats(user_id) dict
+    }
+    class HistoryService {
+        +list_records(user_id, filters) dict
+        +get_record(record_id) DetectionRecord
+        +delete_record(record_id)
+    }
+    class LLMConfigService {
+        +create(user_id, data) LLMConfig
+        +list(user_id) list
+        +update(config_id, data) LLMConfig
+        +delete(config_id)
+        +test_connection(config_id) dict
     }
 
-    DetectionService --> YOLOService : uses
-    DetectionService --> LLMService : uses
-    DetectionService --> ImageService : uses
-    DetectionService --> VideoService : uses
+    BaseService <|-- AuthService
+    BaseService <|-- DetectionService
+    BaseService <|-- YOLOService
+    BaseService <|-- LLMService
+    BaseService <|-- ImageService
+    BaseService <|-- VideoService
+    BaseService <|-- DashboardService
+    BaseService <|-- HistoryService
+    BaseService <|-- LLMConfigService
+
+    %% ── TaskQueue 与处理器 ──
+    class TaskQueue {
+        -Semaphore _semaphore
+        -bool _running
+        +start()
+        +stop()
+        -_process_loop()
+        -_dispatch(db, record)
+    }
+    class ImageProcessor {
+        +process(record)
+    }
+    class VideoProcessor {
+        +process(record)
+    }
+    class FrameAnalysisProcessor {
+        +process(record)
+    }
+    class CameraProcessor {
+        +process(record)
+    }
+    TaskQueue --> ImageProcessor : dispatches to
+    TaskQueue --> VideoProcessor : dispatches to
+    TaskQueue --> FrameAnalysisProcessor : dispatches to
+    TaskQueue --> CameraProcessor : dispatches to
+
+    %% ── 配置模块 ──
+    class Settings {
+        +DatabaseSettings
+        +RedisSettings
+        +AuthSettings
+        +UploadSettings
+        +YOLOSettings
+        +LLMSettings
+        +ServerSettings
+    }
+    class DatabaseSettings {
+        +MYSQL_HOST
+        +MYSQL_PORT
+        +DATABASE_URL
+    }
+    class RedisSettings {
+        +REDIS_HOST
+        +REDIS_PORT
+    }
+    class AuthSettings {
+        +SECRET_KEY
+        +JWT_ALGORITHM
+    }
+    class UploadSettings {
+        +UPLOAD_DIR
+        +MAX_IMAGE_SIZE_MB
+    }
+    class YOLOSettings {
+        +YOLO_DEFAULT_MODEL
+        +YOLO_DEVICE
+    }
+    class LLMSettings {
+        +LLM_TIMEOUT_SECONDS
+    }
+    class ServerSettings {
+        +BACKEND_HOST
+        +CORS_ORIGINS
+    }
+
+    Settings *-- DatabaseSettings
+    Settings *-- RedisSettings
+    Settings *-- AuthSettings
+    Settings *-- UploadSettings
+    Settings *-- YOLOSettings
+    Settings *-- LLMSettings
+    Settings *-- ServerSettings

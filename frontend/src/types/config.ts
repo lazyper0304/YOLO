@@ -42,3 +42,41 @@ export interface YOLOModelInfo {
   is_active: boolean
   uploaded_at: string
 }
+
+/** Embedding model provider type. */
+export type EmbeddingProvider = 'local' | 'openai' | 'custom'
+
+/** Embedding model configuration. */
+export interface EmbeddingConfig {
+  id: number
+  user_id: number
+  name: string
+  provider: EmbeddingProvider
+  model_name: string
+  api_base_url: string | null
+  dimension: number
+  is_active: boolean
+  is_default: boolean
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Embedding config create/update form. */
+export interface EmbeddingConfigForm {
+  name: string
+  provider: EmbeddingProvider
+  model_name: string
+  api_base_url?: string
+  api_key?: string
+  dimension: number
+  is_active: boolean
+  description?: string
+}
+
+/** Embedding connection test result. */
+export interface EmbeddingTestResult {
+  success: boolean
+  message: string
+  response_time_ms: number
+}

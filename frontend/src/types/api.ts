@@ -50,3 +50,24 @@ export interface DetectionResult {
   processing_time_ms: number
   created_at: string
 }
+
+/** Single frame analysis result in video/camera tasks. */
+export interface FrameAnalysisResult {
+  frame_index: number
+  time_seconds: number
+  bboxes: BBox[]
+  llm_analysis: LLMAnalysis | null
+  thumbnail_path?: string
+}
+
+/** Video analysis configuration. */
+export interface VideoAnalysisConfig {
+  frame_interval_seconds: number
+  analysis_prompt?: string
+}
+
+/** Generated analysis prompt response. */
+export interface GeneratedPrompt {
+  prompt: string
+  llm_model: string
+}

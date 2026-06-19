@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import client from '@/api/client'
+import { getSystemStatus } from '@/api/system'
+import { SwitchButton } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -17,8 +18,7 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 async function fetchStatus() {
   try {
-    const res = await client.get('/api/system/status')
-    const d = res.data.data
+    const d = await getSystemStatus()
     cpuPercent.value = d.cpu_percent
     memPercent.value = d.memory_percent
     if (d.gpu?.available) {
@@ -27,45 +27,44 @@ async function fetchStatus() {
       gpuTotal.value = d.gpu.memory_total_mb
       gpuTemp.value = d.gpu.temperature || 0
     }
-  } catch { /* ignore */ }
+  } catch { /* */ }
 }
 
-onMounted(() => {
-  fetchStatus()
-  timer = setInterval(fetchStatus, 1000)
-})
+onMounted(() => { fetchStatus(); timer = setInterval(fetchStatus, 5000) })
+onUnmounted(() => { if (timer) clearInterval(timer) })
 
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+function handleLogout() { authStore.logout(); router.push('/login') }
 
-function handleLogout() {
-  authStore.logout()
-  router.push('/login')
-}
-
-function color(percent: number) {
-  if (percent > 80) return '#F56C6C'
-  if (percent > 50) return '#E6A23C'
+function color(v: number) {
+  if (v > 80) return '#F56C6C'
+  if (v > 50) return '#E6A23C'
   return '#67C23A'
 }
 </script>
 
 <template>
-  <header class="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0 z-10">
-    <h1 class="text-lg font-bold text-gray-800">YOLO 目标检测平台</h1>
-
-    <div class="flex items-center gap-4 text-xs text-gray-500">
-      <span :style="{ color: color(cpuPercent) }">CPU {{ cpuPercent }}%</span>
-      <span :style="{ color: color(memPercent) }">MEM {{ memPercent }}%</span>
-      <span v-if="gpuTotal" :style="{ color: color(gpuUtil) }">
-        GPU {{ gpuUtil }}% {{ gpuUsed }}/{{ gpuTotal }}MB {{ gpuTemp }}°C
-      </span>
+  <header class="h-11 bg-white border-b border-gray-200 flex items-center justify-between px-4 flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <span class="text-sm font-bold text-gray-700 tracking-tight">YOLO 目标检测分析平台</span>
+      <div class="flex items-center gap-1.5 text-[10px]">
+        <span v-if="gpuTotal" class="flex items-center gap-1 text-gray-400">
+          <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ background: color(gpuUtil) }"></span>
+          GPU {{ gpuUtil }}%
+        </span>
+        <span class="flex items-center gap-1 text-gray-400">
+          <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ background: color(cpuPercent) }"></span>
+          CPU {{ cpuPercent }}%
+        </span>
+        <span class="flex items-center gap-1 text-gray-400">
+          <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ background: color(memPercent) }"></span>
+          MEM {{ memPercent }}%
+        </span>
+      </div>
     </div>
 
     <div class="flex items-center gap-3">
-      <span class="text-sm text-gray-600">{{ authStore.username }}</span>
-      <el-button type="danger" size="small" plain @click="handleLogout">退出</el-button>
+      <span class="text-xs text-gray-500">{{ authStore.username }}</span>
+      <el-button text size="small" type="danger" :icon="SwitchButton" @click="handleLogout">退出</el-button>
     </div>
   </header>
 </template>

@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import AppHeader from '@/components/layout/AppHeader.vue'
-import LeftSidebar from '@/components/layout/LeftSidebar.vue'
+import { LayoutShell } from '@/components'
 import { useConfigStore } from '@/stores/config'
 import LLMConfigDialog from '@/components/config/LLMConfigDialog.vue'
 import YOLOModelUpload from '@/components/config/YOLOModelUpload.vue'
-import type { LLMConfig, LLMConfigForm } from '@/types/config'
+import EmbeddingConfigDialog from '@/components/config/EmbeddingConfigDialog.vue'
+import type { LLMConfig, LLMConfigForm, EmbeddingConfig } from '@/types/config'
 
 const configStore = useConfigStore()
 const showLLMDialog = ref(false)
+const editingLLMConfig = ref<LLMConfig | null>(null)
 const showYOLOUpload = ref(false)
+const showEmbeddingDialog = ref(false)
+const editingEmbeddingConfig = ref<EmbeddingConfig | null>(null)
 
 onMounted(async () => {
-  await Promise.all([configStore.fetchYOLOModels(), configStore.fetchLLMConfigs()])
+  await Promise.all([
+    configStore.fetchYOLOModels(),
+    configStore.fetchLLMConfigs(),
+    configStore.fetchEmbeddingConfigs(),
+  ])
 })
 
 async function deleteYOLO(id: number) {
@@ -28,20 +35,67 @@ async function deleteLLM(id: number) {
   ElMessage.success('已删除')
 }
 
-async function testLLM(id: number) {
-  const result = await configStore.testLLMConfig(id)
-  if (result.success) ElMessage.success('连接成功 ' + result.response_time_ms.toFixed(0) + 'ms')
-  else ElMessage.error(result.message)
+async function toggleLLM(row: { id: number; is_active: boolean }) {
+  const newActive = !row.is_active
+  const action = newActive ? '启用' : '停用'
+  try {
+    await configStore.updateLLMConfig(row.id, { is_active: newActive })
+    ElMessage.success(`已${action}`)
+  } catch {
+    ElMessage.error(`${action}失败`)
+  }
+}
+
+function openEditLLM(config: LLMConfig | null) {
+  editingLLMConfig.value = config
+  showLLMDialog.value = true
+}
+
+function closeLLMDialog() {
+  showLLMDialog.value = false
+  editingLLMConfig.value = null
+}
+
+async function deleteEmbedding(id: number) {
+  try { await ElMessageBox.confirm('确定删除此嵌入模型配置吗？', '确认', { type: 'warning' }) } catch { return }
+  await configStore.deleteEmbeddingConfig(id)
+  ElMessage.success('已删除')
+}
+
+async function toggleEmbedding(row: { id: number; is_active: boolean }) {
+  const newActive = !row.is_active
+  const action = newActive ? '启用' : '停用'
+  try {
+    await configStore.updateEmbeddingConfig(row.id, { is_active: newActive })
+    ElMessage.success(`已${action}`)
+  } catch {
+    ElMessage.error(`${action}失败`)
+  }
+}
+
+function openEditEmbedding(config: EmbeddingConfig) {
+  editingEmbeddingConfig.value = config
+  showEmbeddingDialog.value = true
+}
+
+function closeEmbeddingDialog() {
+  showEmbeddingDialog.value = false
+  editingEmbeddingConfig.value = null
+}
+
+function providerLabel(provider: string) {
+  const map: Record<string, string> = {
+    local: '本地',
+    openai: 'OpenAI',
+    custom: '自定义',
+  }
+  return map[provider] || provider
 }
 </script>
 
 <template>
-  <div class="h-screen flex flex-col overflow-hidden">
-    <AppHeader />
-    <div class="flex-1 grid grid-cols-[180px_1fr] overflow-hidden">
-      <LeftSidebar />
-      <main class="flex-1 overflow-auto bg-gray-50">
-        <div class="max-w-5xl mx-auto p-8 space-y-8">
+  <LayoutShell>
+    <div class="p-8 space-y-8">
           <h2 class="text-2xl font-bold mb-6">模型算法管理</h2>
 
           <!-- YOLO Models -->
@@ -76,7 +130,7 @@ async function testLLM(id: number) {
           <div class="bg-white rounded-lg shadow-sm">
             <div class="flex items-center justify-between p-5 border-b">
               <h3 class="text-base font-semibold">LLM 配置管理</h3>
-              <el-button type="primary" size="small" :disabled="configStore.isLoadingLLM" :loading="configStore.isLoadingLLM" @click="showLLMDialog = true">{{ configStore.isLoadingLLM ? '加载中...' : '添加配置' }}</el-button>
+              <el-button type="primary" size="small" :disabled="configStore.isLoadingLLM" :loading="configStore.isLoadingLLM" @click="openEditLLM(null)">{{ configStore.isLoadingLLM ? '加载中...' : '添加配置' }}</el-button>
             </div>
             <el-table :data="configStore.llmConfigs" size="small" stripe>
               <el-table-column prop="id" label="ID" width="60" />
@@ -89,18 +143,74 @@ async function testLLM(id: number) {
               <el-table-column label="状态" width="70">
                 <template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template>
               </el-table-column>
-              <el-table-column label="操作" width="160">
+              <el-table-column label="操作" width="210">
                 <template #default="{ row }">
-                  <el-button size="small" @click="testLLM(row.id)">测试</el-button>
+                  <el-button size="small" @click="openEditLLM(row)">编辑</el-button>
+                  <el-button
+                    v-if="!row.is_active"
+                    size="small"
+                    type="success"
+                    plain
+                    @click="toggleLLM(row)"
+                  >启用</el-button>
+                  <el-button
+                    v-else
+                    size="small"
+                    type="warning"
+                    plain
+                    @click="toggleLLM(row)"
+                  >停用</el-button>
                   <el-button size="small" type="danger" plain @click="deleteLLM(row.id)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
           </div>
+
+          <!-- Embedding Model Configs -->
+          <div class="bg-white rounded-lg shadow-sm">
+            <div class="flex items-center justify-between p-5 border-b">
+              <h3 class="text-base font-semibold">知识库嵌入模型管理</h3>
+              <el-button type="primary" size="small" :disabled="configStore.isLoadingEmbedding" :loading="configStore.isLoadingEmbedding" @click="openEditEmbedding(null!)">{{ configStore.isLoadingEmbedding ? '加载中...' : '添加模型' }}</el-button>
+            </div>
+            <div v-if="configStore.embeddingConfigs.length === 0" class="p-8 text-center text-gray-400">
+              暂无嵌入模型配置，点击上方按钮添加
+            </div>
+            <el-table v-else :data="configStore.embeddingConfigs" size="small" stripe>
+              <el-table-column prop="id" label="ID" width="60" />
+              <el-table-column prop="name" label="配置名称" />
+              <el-table-column label="提供商" width="80">
+                <template #default="{ row }"><el-tag size="small">{{ providerLabel(row.provider) }}</el-tag></template>
+              </el-table-column>
+              <el-table-column prop="model_name" label="模型名" min-width="180" />
+              <el-table-column label="维度" width="80" prop="dimension" />
+              <el-table-column label="状态" width="70">
+                <template #default="{ row }"><el-tag size="small" :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? '启用' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="操作" width="210">
+                <template #default="{ row }">
+                  <el-button size="small" @click="openEditEmbedding(row)">编辑</el-button>
+                  <el-button
+                    v-if="!row.is_active"
+                    size="small"
+                    type="success"
+                    plain
+                    @click="toggleEmbedding(row)"
+                  >启用</el-button>
+                  <el-button
+                    v-else
+                    size="small"
+                    type="warning"
+                    plain
+                    @click="toggleEmbedding(row)"
+                  >停用</el-button>
+                  <el-button v-if="!row.is_default" size="small" type="danger" plain @click="deleteEmbedding(row.id)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </div>
-      </main>
-    </div>
-    <LLMConfigDialog v-model:visible="showLLMDialog" />
+    <LLMConfigDialog v-model:visible="showLLMDialog" :edit-config="editingLLMConfig" @update:visible="closeLLMDialog" />
     <YOLOModelUpload v-model:visible="showYOLOUpload" />
-  </div>
+    <EmbeddingConfigDialog v-model:visible="showEmbeddingDialog" :edit-config="editingEmbeddingConfig" @update:visible="closeEmbeddingDialog" />
+  </LayoutShell>
 </template>

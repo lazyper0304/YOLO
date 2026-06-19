@@ -43,3 +43,16 @@ dump.rdb
 # Python
 *.egg
 Pipfile.lock
+
+# WorkBuddy
+.workbuddy/
+.claude/
+
+# ChromaDB data
+chroma_data/
+
+# Temp backup files
+*_restored.py
+
+# Partial downloads
+*.partial

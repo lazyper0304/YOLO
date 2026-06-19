@@ -1,17 +1,23 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { LLMConfig, LLMConfigForm, LLMTestResult, YOLOModelInfo } from '@/types/config'
+import type { LLMConfig, LLMConfigForm, LLMTestResult, YOLOModelInfo, EmbeddingConfig, EmbeddingConfigForm, EmbeddingTestResult } from '@/types/config'
 import { llmConfigApi } from '@/api/llm_config'
 import { yoloModelsApi } from '@/api/yolo_models'
+import { embeddingConfigApi } from '@/api/embedding_config'
 
 export const useConfigStore = defineStore('config', () => {
   const llmConfigs = ref<LLMConfig[]>([])
   const yoloModels = ref<YOLOModelInfo[]>([])
+  const embeddingConfigs = ref<EmbeddingConfig[]>([])
   const isLoadingLLM = ref(false)
   const isLoadingYOLO = ref(false)
+  const isLoadingEmbedding = ref(false)
 
   const activeLLMConfig = computed(() =>
     llmConfigs.value.find((c) => c.is_active) || null
+  )
+  const activeEmbeddingConfig = computed(() =>
+    embeddingConfigs.value.find((c) => c.is_active) || null
   )
   const customModels = computed(() =>
     yoloModels.value.filter((m) => !m.is_builtin)
@@ -77,12 +83,52 @@ export const useConfigStore = defineStore('config', () => {
     await updateLLMConfig(id, { is_active: true })
   }
 
+  // Embedding Config functions
+  async function fetchEmbeddingConfigs() {
+    isLoadingEmbedding.value = true
+    try {
+      const res = await embeddingConfigApi.list()
+      embeddingConfigs.value = res.data.data as EmbeddingConfig[]
+    } finally {
+      isLoadingEmbedding.value = false
+    }
+  }
+
+  async function createEmbeddingConfig(form: EmbeddingConfigForm) {
+    const res = await embeddingConfigApi.create(form)
+    await fetchEmbeddingConfigs()
+    return res.data.data
+  }
+
+  async function updateEmbeddingConfig(id: number, form: Partial<EmbeddingConfigForm>) {
+    const res = await embeddingConfigApi.update(id, form)
+    await fetchEmbeddingConfigs()
+    return res.data.data
+  }
+
+  async function deleteEmbeddingConfig(id: number) {
+    await embeddingConfigApi.delete(id)
+    await fetchEmbeddingConfigs()
+  }
+
+  async function testEmbeddingConfig(id: number): Promise<EmbeddingTestResult> {
+    const res = await embeddingConfigApi.test(id)
+    return res.data.data as EmbeddingTestResult
+  }
+
+  async function setActiveEmbeddingConfig(id: number) {
+    await updateEmbeddingConfig(id, { is_active: true })
+  }
+
   return {
     llmConfigs,
     yoloModels,
+    embeddingConfigs,
     isLoadingLLM,
     isLoadingYOLO,
+    isLoadingEmbedding,
     activeLLMConfig,
+    activeEmbeddingConfig,
     customModels,
     builtinModels,
     fetchLLMConfigs,
@@ -94,5 +140,11 @@ export const useConfigStore = defineStore('config', () => {
     uploadYOLOModel,
     deleteYOLOModel,
     setActiveLLMConfig,
+    fetchEmbeddingConfigs,
+    createEmbeddingConfig,
+    updateEmbeddingConfig,
+    deleteEmbeddingConfig,
+    testEmbeddingConfig,
+    setActiveEmbeddingConfig,
   }
 })

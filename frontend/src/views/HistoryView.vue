@@ -4,8 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useHistoryStore } from '@/stores/history'
 import { Loading, Picture, ArrowRight } from '@element-plus/icons-vue'
-import AppHeader from '@/components/layout/AppHeader.vue'
-import LeftSidebar from '@/components/layout/LeftSidebar.vue'
+import { LayoutShell } from '@/components'
 import type { DetectionMode, SourceType } from '@/types/detection'
 
 const router = useRouter()
@@ -48,12 +47,8 @@ function modeLabel(mode: string) {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col overflow-hidden">
-    <AppHeader />
-    <div class="flex-1 grid grid-cols-[180px_1fr] overflow-hidden">
-      <LeftSidebar />
-      <main class="flex-1 overflow-auto bg-gray-50">
-        <div class="max-w-4xl mx-auto p-8">
+  <LayoutShell>
+    <div class="p-8">
           <h2 class="text-2xl font-bold mb-6">历史记录</h2>
 
           <!-- Filters -->
@@ -134,7 +129,5 @@ function modeLabel(mode: string) {
             />
           </div>
         </div>
-      </main>
-    </div>
-  </div>
+  </LayoutShell>
 </template>

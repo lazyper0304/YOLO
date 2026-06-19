@@ -38,6 +38,9 @@ class DetectionService:
         model_id: int | None = None,
         llm_config_id: int | None = None,
         save_record: bool = True,
+        llm_analysis_scope: str = "full",
+        kb_ids: list[int] | None = None,
+        analysis_prompt: str | None = None,
     ) -> dict:
         """Run the full image detection pipeline and persist results."""
         start_time = time.time()
@@ -69,6 +72,16 @@ class DetectionService:
                 llm_config = await self._resolve_llm_config(llm_config_id, user_id)
                 # Encode image to base64
                 img_b64 = self.image_service.encode_image_base64(image_path)
+
+                # Build prompt: use user's analysis_prompt if provided, else default + RAG
+                prompt = analysis_prompt
+                if not prompt:
+                    prompt = None  # Let LLM use its default
+                if kb_ids:
+                    rag_context = await self._build_rag_context(kb_ids, analysis_prompt or "请分析这张图片中的目标对象")
+                    if rag_context:
+                        prompt = f"{rag_context}\n\n用户指令: {analysis_prompt}" if analysis_prompt else rag_context
+
                 # Call LLM
                 llm_result = await self.llm_service.analyze_image(
                     api_base_url=llm_config.api_base_url,
@@ -76,6 +89,7 @@ class DetectionService:
                     model_name=llm_config.model_name,
                     image_base64=img_b64,
                     provider=llm_config.provider,
+                    prompt=prompt,
                 )
                 result_json["llm_analysis"] = llm_result
 
@@ -89,54 +103,74 @@ class DetectionService:
                 llm_config = await self._resolve_llm_config(llm_config_id, user_id)
                 api_key = decrypt_api_key(llm_config.api_key)
 
-                # Build YOLO context for LLM
-                yolo_context = ""
-                if bboxes:
-                    yolo_objects = [f"{b['class_name']}(置信度 {b['confidence']:.0%})" for b in bboxes]
-                    yolo_context = (
-                        "YOLO 模型已检测到以下对象：" + "、".join(yolo_objects) + "。"
-                        "请仅针对以上YOLO检测到的目标进行分析，不要描述图中未检测到的内容。"
-                        "简要总结这些对象的核心特征，100字以内。"
-                    )
-
-                # Full image analysis with YOLO context
-                img_b64 = self.image_service.encode_image_base64(image_path)
-                llm_result = await self.llm_service.analyze_image(
-                    api_base_url=llm_config.api_base_url,
-                    api_key=api_key,
-                    model_name=llm_config.model_name,
-                    image_base64=img_b64,
-                    provider=llm_config.provider,
-                    prompt=yolo_context if yolo_context else None,
-                )
-
-                # Concurrent region analysis (max 3 at a time)
-                semaphore = asyncio.Semaphore(3)
-                region_tasks = []
-                for i, bbox in enumerate(bboxes):
-                    region_tasks.append(
-                        self._analyze_region_with_semaphore(
-                            semaphore=semaphore,
-                            image_path=image_path,
-                            bbox=bbox,
-                            index=i,
-                            llm_config=llm_config,
-                            api_key=api_key,
+                # Full-image analysis (skip if region-only scope)
+                if llm_analysis_scope != "region":
+                    # Build YOLO context for LLM
+                    yolo_context = ""
+                    if bboxes:
+                        yolo_objects = [f"{b['class_name']}(置信度 {b['confidence']:.0%})" for b in bboxes]
+                        yolo_context = (
+                            "YOLO 模型已检测到以下对象：" + "、".join(yolo_objects) + "。"
+                            "请仅针对以上YOLO检测到的目标进行分析，不要描述图中未检测到的内容。"
+                            "简要总结这些对象的核心特征，100字以内。"
                         )
+
+                    # Add RAG context if kb_ids provided
+                    if kb_ids:
+                        rag_context = await self._build_rag_context(
+                            kb_ids,
+                            analysis_prompt or yolo_context or "请分析这张图片中的目标对象",
+                        )
+                        yolo_context = rag_context if rag_context else yolo_context
+
+                    # Use user's analysis_prompt if provided
+                    if analysis_prompt and yolo_context:
+                        yolo_context = f"{yolo_context}\n\n用户指令: {analysis_prompt}"
+                    elif analysis_prompt:
+                        yolo_context = analysis_prompt
+
+                    # Full image analysis with YOLO context
+                    img_b64 = self.image_service.encode_image_base64(image_path)
+                    llm_result = await self.llm_service.analyze_image(
+                        api_base_url=llm_config.api_base_url,
+                        api_key=api_key,
+                        model_name=llm_config.model_name,
+                        image_base64=img_b64,
+                        provider=llm_config.provider,
+                        prompt=yolo_context if yolo_context else None,
                     )
+                else:
+                    llm_result = {"summary": "局部分析模式（仅分析YOLO检测到的区域）", "objects_detected": [], "detailed_analysis": ""}
 
-                region_results = await asyncio.gather(*region_tasks, return_exceptions=True)
-                region_analyses = []
-                for i, res in enumerate(region_results):
-                    if isinstance(res, Exception):
-                        region_analyses.append({
-                            "object": bboxes[i]["class_name"],
-                            "description": f"Error: {str(res)}",
-                        })
-                    else:
-                        region_analyses.append(res)
+                # Region analysis — only when scope is "region" or "collaborative"
+                if llm_analysis_scope != "full":
+                    semaphore = asyncio.Semaphore(3)
+                    region_tasks = []
+                    for i, bbox in enumerate(bboxes):
+                        region_tasks.append(
+                            self._analyze_region_with_semaphore(
+                                semaphore=semaphore,
+                                image_path=image_path,
+                                bbox=bbox,
+                                index=i,
+                                llm_config=llm_config,
+                                api_key=api_key,
+                            )
+                        )
 
-                llm_result["region_analyses"] = region_analyses
+                    region_results = await asyncio.gather(*region_tasks, return_exceptions=True)
+                    region_analyses = []
+                    for i, res in enumerate(region_results):
+                        if isinstance(res, Exception):
+                            region_analyses.append({
+                                "object": bboxes[i]["class_name"],
+                                "description": f"Error: {str(res)}",
+                            })
+                        else:
+                            region_analyses.append(res)
+
+                    llm_result["region_analyses"] = region_analyses
+                llm_result["analysis_scope"] = llm_analysis_scope
                 result_json["llm_analysis"] = llm_result
 
             # Generate thumbnail
@@ -219,6 +253,19 @@ class DetectionService:
                 region_label=bbox["class_name"],
                 provider=llm_config.provider,
             )
+
+    async def _build_rag_context(self, kb_ids: list[int], query: str) -> str:
+        """Build RAG context from knowledge bases and merge with the original prompt."""
+        from app.services.retrieval_service import RetrievalService
+        retrieval = RetrievalService()
+        search_results = await retrieval.search(kb_ids=kb_ids, query=query, top_k=3)
+        if not search_results:
+            return query
+        context = retrieval.build_context(search_results, max_tokens=1000)
+        return (
+            f"参考资料（来自知识库）:\n{context}\n\n"
+            f"请结合以上参考资料和图片内容进行分析。\n\n{query}"
+        )
 
     async def _resolve_yolo_model_path(
         self, model_id: int | None, user_id: int
