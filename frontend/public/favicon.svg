@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="url(#bg)"/>
+  <g transform="translate(5,3)" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Camera body -->
+    <rect x="1" y="7" width="20" height="14" rx="2"/>
+    <rect x="7" y="5" width="8" height="3" rx="1"/>
+    <!-- Lens -->
+    <circle cx="11" cy="14" r="4.5"/>
+    <circle cx="11" cy="14" r="2"/>
+    <!-- Flash -->
+    <circle cx="4" cy="10" r="1" fill="#fff"/>
+  </g>
+</svg>
