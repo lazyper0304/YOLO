@@ -136,9 +136,46 @@ function selectKB(kb: KnowledgeBase) {
   store.fetchDocuments(kb.id)
 }
 
-function handleUpload(uploadFile: any) {
-  if (store.currentKB) {
-    store.uploadDocument(store.currentKB.id, uploadFile.raw || uploadFile.file)
+// ─── 上传文档（单个或批量） ─────────────────────────────────────
+const showBatchUploadDialog = ref(false)
+const batchUploadFiles = ref<File[]>([])
+const batchUploadProgress = ref<string[]>([])
+const isBatchUploading = ref(false)
+const batchFileInputRef = ref<HTMLInputElement | null>(null)
+
+function openBatchUpload() {
+  batchUploadFiles.value = []
+  batchUploadProgress.value = []
+  showBatchUploadDialog.value = true
+}
+
+function onBatchFilesSelected(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files) return
+  batchUploadFiles.value = Array.from(input.files)
+}
+
+async function startBatchUpload() {
+  if (!store.currentKB || batchUploadFiles.value.length === 0) return
+  isBatchUploading.value = true
+  batchUploadProgress.value = []
+  let success = 0
+  let failed = 0
+  for (let i = 0; i < batchUploadFiles.value.length; i++) {
+    const file = batchUploadFiles.value[i]
+    try {
+      await store.uploadDocument(store.currentKB.id, file)
+      batchUploadProgress.value.push(`✅ ${file.name} 上传成功`)
+      success++
+    } catch {
+      batchUploadProgress.value.push(`❌ ${file.name} 上传失败`)
+      failed++
+    }
+  }
+  isBatchUploading.value = false
+  ElMessage.success(`批量上传完成：成功 ${success} 个，失败 ${failed} 个`)
+  if (failed === 0) {
+    showBatchUploadDialog.value = false
   }
 }
 
@@ -263,17 +300,14 @@ function fileTypeIcon(type: string) {
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
-                  <!-- Upload -->
-                  <el-upload
-                    :show-file-list="false"
-                    :auto-upload="false"
-                    accept=".txt,.md,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"
-                    @change="handleUpload"
-                  >
-                    <el-button type="primary" size="small" :icon="Upload" :loading="store.isUploading">
-                      上传文档
-                    </el-button>
-                  </el-upload>
+                  <el-button type="primary" size="small" :icon="Upload" @click="openBatchUpload">上传文档</el-button>
+                  <el-button size="small" :icon="EditPen" @click="openEditDialog(store.currentKB!)">编辑</el-button>
+                  <el-popconfirm title="确定删除此知识库？所有文档将被永久删除。" confirm-button-text="删除" cancel-button-text="取消"
+                    @confirm="handleDelete(store.currentKB!)">
+                    <template #reference>
+                      <el-button size="small" type="danger" plain :icon="Delete">删除</el-button>
+                    </template>
+                  </el-popconfirm>
                   <!-- More actions dropdown -->
                   <el-dropdown trigger="click">
                     <el-button size="small">更多 <el-icon class="el-icon--right"><MoreFilled /></el-icon></el-button>
@@ -457,6 +491,38 @@ function fileTypeIcon(type: string) {
       </div>
       <template #footer>
         <el-button v-if="store.importStatus?.status !== 'running'" @click="store.importDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 上传文档对话框 -->
+    <el-dialog v-model="showBatchUploadDialog" title="上传文档" width="480px" top="15vh">
+      <div class="space-y-4">
+        <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors cursor-pointer"
+          @click="batchFileInputRef?.click()">
+          <el-icon :size="32" color="#9ca3af"><Upload /></el-icon>
+          <p class="text-sm text-gray-400 mt-2">
+            {{ batchUploadFiles.length > 0 ? `已选择 ${batchUploadFiles.length} 个文件` : '点击选择多个文件' }}
+          </p>
+          <p class="text-xs text-gray-300 mt-1">支持 .txt .md .pdf .docx .jpg .png 等格式，可单选或多选</p>
+        </div>
+        <input ref="batchFileInputRef" type="file" multiple hidden
+          accept=".txt,.md,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"
+          @change="onBatchFilesSelected" />
+        <div v-if="batchUploadFiles.length > 0" class="text-xs text-gray-500 space-y-1 max-h-32 overflow-y-auto">
+          <div v-for="(f, i) in batchUploadFiles" :key="i">{{ i + 1 }}. {{ f.name }}</div>
+        </div>
+        <div v-if="batchUploadProgress.length > 0" class="text-xs space-y-1 max-h-48 overflow-y-auto bg-gray-50 rounded p-2">
+          <div v-for="(msg, i) in batchUploadProgress" :key="i" :class="msg.startsWith('✅') ? 'text-green-600' : 'text-red-500'">
+            {{ msg }}
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showBatchUploadDialog = false" :disabled="isBatchUploading">取消</el-button>
+        <el-button type="primary" :loading="isBatchUploading" :disabled="batchUploadFiles.length === 0"
+          @click="startBatchUpload">
+          开始上传 ({{ batchUploadFiles.length }})
+        </el-button>
       </template>
     </el-dialog>
   </LayoutShell>

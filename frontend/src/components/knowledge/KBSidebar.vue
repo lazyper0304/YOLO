@@ -82,7 +82,7 @@ function selectKB(kb: KnowledgeBase) {
               <span>{{ kb.chunk_count }} 片段</span>
             </div>
           </div>
-          <el-dropdown trigger="click" class="opacity-0 group-hover:opacity-100 transition-opacity">
+          <el-dropdown trigger="click" class="flex-shrink-0 ml-1">
             <el-button link size="small" class="!p-0"><MoreFilled :size="14" class="text-gray-400" /></el-button>
             <template #dropdown>
               <el-dropdown-menu>
