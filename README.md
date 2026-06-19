@@ -34,6 +34,8 @@ cd YOLO/end
 
 ### 2. 创建并激活虚拟环境
 
+**方式 A：Python venv（推荐）**
+
 ```powershell
 # 创建虚拟环境
 python -m venv .venv
@@ -46,6 +48,16 @@ python -m venv .venv
 
 # 激活（Linux / macOS）
 source .venv/bin/activate
+```
+
+**方式 B：Anaconda / Miniconda**
+
+```powershell
+# 创建环境
+conda create -n yolo python=3.13 -y
+
+# 激活
+conda activate yolo
 ```
 
 ### 3. 初始化数据库
@@ -88,6 +100,8 @@ SECRET_KEY=随机生成32位以上字符串
 
 ```powershell
 cd backend
+
+# 确保虚拟环境已激活（venv 或 conda）
 pip install -r requirements.txt
 
 # 如果已通过 init_database.sql 初始化数据库，则只需 stamp 当前版本
